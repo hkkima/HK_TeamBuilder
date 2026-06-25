@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+output/*.md
+output/*.csv
+.DS_Store
