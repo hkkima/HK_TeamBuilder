@@ -3,8 +3,42 @@
 23명 규모 수강생을 **개인간 관계도 + 성향** 위주로 분석해 팀을 짜고,
 서로 다른 추천안 여러 개를 제시하는 도구입니다. 역량 수준은 **보조 지표**로만 사용합니다.
 
+- **웹 프론트(GitHub Pages)** + **Python CLI** 두 가지 사용 방식 제공
 - 설치 불필요: Python 3.9+ 표준 라이브러리만 사용 (pandas 등 의존성 없음)
-- 입력은 CSV 2개(수강생 정보 / 이전 팀플 상호평가), 출력은 Markdown 리포트 + CSV
+- 입력은 CSV 2개(수강생 정보 / 이전 팀플 상호평가), 출력은 Markdown/HTML 리포트 + CSV
+
+## 웹 프론트 (운영진 공유용)
+
+`docs/` 폴더가 정적 웹 앱입니다. 로그인(공유 ID/PW) 후 브라우저에서 바로 사용합니다.
+파이썬 알고리즘을 JavaScript로 포팅해 **모든 계산이 브라우저 안에서만** 일어나며,
+업로드한 학생 데이터는 서버나 저장소로 전송되지 않습니다.
+
+### GitHub Pages 배포 (1회 설정)
+
+1. 이 브랜치(`claude/student-team-builder-i5lx81`)를 main에 병합하거나 그대로 둡니다.
+2. GitHub 저장소 → **Settings → Pages**
+3. **Source: Deploy from a branch** 선택
+4. **Branch**: 배포할 브랜치 + **`/docs`** 폴더 선택 → Save
+5. 1~2분 후 `https://<계정>.github.io/<레포>/` 로 접속
+
+### 로그인 자격증명 (기본값 → 반드시 변경)
+
+- 기본 **ID: `hkadmin` / PW: `teambuilder2026`**
+- 변경 방법: `docs/setup.html`(배포 후 `.../setup.html`)에서 새 ID/PW의 해시를 생성 →
+  `docs/js/auth.js`의 `CREDENTIAL_HASH` 값을 교체 후 커밋
+- ⚠️ **보안 주의**: 정적 페이지의 클라이언트 로그인은 *난독화 수준*입니다.
+  소스를 분석하면 우회할 수 있습니다. 강한 보호가 필요하면 **저장소를 private**으로 두세요
+  (실제 학생 데이터는 어차피 브라우저에서만 처리되어 저장소엔 올라가지 않습니다).
+
+### 로컬에서 미리보기
+
+```bash
+cd docs && python3 -m http.server 8000   # http://localhost:8000 접속
+```
+
+---
+
+## Python CLI
 
 ## 우선순위 (알고리즘 목표)
 
@@ -104,6 +138,14 @@ python build_teams.py \
 ## 프로젝트 구조
 
 ```
+docs/                     GitHub Pages 정적 웹 앱
+  index.html              로그인 게이트 + 팀빌더 UI
+  setup.html              로그인 해시 생성기
+  css/styles.css          스타일
+  js/auth.js              공유 ID/PW 로그인 게이트
+  js/teambuilder.js       알고리즘(파이썬 포팅, 브라우저 실행)
+  js/app.js               UI 연결·렌더링·CSV 내보내기
+  js/sample.js            내장 샘플 데이터
 build_teams.py            CLI 진입점
 teambuilder/
   models.py               데이터 모델(학생/평가/팀), 역할 정규화

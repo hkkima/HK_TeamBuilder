@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>수강생 팀빌더 · 운영진 전용</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🧩</text></svg>" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <!-- 로그인 게이트 -->
+  <div id="login-screen">
+    <form id="login-form" class="login-card" autocomplete="off">
+      <h1>🧩 수강생 팀빌더</h1>
+      <p class="sub">운영진 전용 · 공유 ID/PW가 필요합니다</p>
+      <label>ID<input id="login-id" type="text" autocomplete="username" required /></label>
+      <label>비밀번호<input id="login-pw" type="password" autocomplete="current-password" required /></label>
+      <button type="submit">로그인</button>
+      <div id="login-error" class="error"></div>
+      <p class="hint">※ 정적 페이지 보호는 난독화 수준입니다. 데이터는 브라우저에서만 처리됩니다.</p>
+    </form>
+  </div>
+
+  <!-- 앱 본체 -->
+  <div id="app" style="display:none">
+    <header class="topbar">
+      <div class="brand">🧩 수강생 팀빌더 <span class="badge">운영진</span></div>
+      <button class="ghost" onclick="HKLogout()">로그아웃</button>
+    </header>
+
+    <main class="layout">
+      <!-- 좌측: 입력/설정 -->
+      <section class="panel">
+        <h2>1. 데이터 입력</h2>
+        <div class="row">
+          <button id="btn-sample" class="primary">샘플 데이터 불러오기</button>
+          <button id="btn-tmpl-students" class="ghost">학생 템플릿</button>
+          <button id="btn-tmpl-evals" class="ghost">평가 템플릿</button>
+        </div>
+
+        <div class="field">
+          <label>수강생 CSV (students)</label>
+          <input id="file-students" type="file" accept=".csv" />
+          <textarea id="ta-students" rows="4" placeholder="여기에 CSV를 붙여넣거나 위에서 파일 선택"></textarea>
+        </div>
+        <div class="field">
+          <label>상호평가 CSV (peer_evaluations) — 선택</label>
+          <input id="file-evals" type="file" accept=".csv" />
+          <textarea id="ta-evals" rows="4" placeholder="평가 데이터가 없으면 성향/역할만으로 구성"></textarea>
+        </div>
+        <div id="data-status" class="status"></div>
+
+        <h2>2. 팀 구성</h2>
+        <div class="field inline">
+          <label>구성 방식</label>
+          <select id="mode">
+            <option value="teams">팀 개수로</option>
+            <option value="sizes">팀 크기 직접</option>
+          </select>
+        </div>
+        <div class="field inline" id="wrap-teams">
+          <label>팀 개수</label>
+          <input id="teams" type="number" min="1" value="4" />
+        </div>
+        <div class="field inline" id="wrap-sizes" style="display:none">
+          <label>팀 크기 (쉼표)</label>
+          <input id="sizes" type="text" value="6,6,6,5" />
+        </div>
+        <div class="field inline">
+          <label>추천안 개수</label>
+          <input id="options" type="number" min="1" max="10" value="3" />
+        </div>
+        <div class="field inline">
+          <label>탐색 강도(restarts)</label>
+          <input id="restarts" type="number" min="10" max="400" value="80" />
+        </div>
+        <div class="field inline">
+          <label>시드</label>
+          <input id="seed" type="number" value="42" />
+        </div>
+
+        <details class="adv">
+          <summary>고급: 가중치 / 임계값</summary>
+          <p class="muted">관계·성향 우선, 역량은 보조가 기본값입니다.</p>
+          <div class="grid2">
+            <label>갈등 분리<input id="w-conflict" type="number" step="1" value="100" /></label>
+            <label>긍정 유지<input id="w-positive" type="number" step="1" value="8" /></label>
+            <label>이전 팀 섞기<input id="w-prev_mix" type="number" step="1" value="6" /></label>
+            <label>성향(MBTI)<input id="w-mbti_balance" type="number" step="1" value="16" /></label>
+            <label>역할 배분<input id="w-role_coverage" type="number" step="1" value="14" /></label>
+            <label>리더 분포<input id="w-leader_balance" type="number" step="1" value="12" /></label>
+            <label>역량(보조)<input id="w-competency_balance" type="number" step="1" value="6" /></label>
+            <label>갈등 임계<input id="conflict-th" type="number" step="0.1" value="2.0" /></label>
+            <label>긍정 임계<input id="positive-th" type="number" step="0.1" value="4.0" /></label>
+          </div>
+        </details>
+
+        <button id="btn-run" class="primary big">팀 추천 생성</button>
+      </section>
+
+      <!-- 우측: 결과 -->
+      <section class="panel results">
+        <div class="results-head">
+          <h2>추천 결과</h2>
+          <button id="btn-export" class="ghost" disabled>CSV 내보내기</button>
+        </div>
+        <div id="summary" class="summary"></div>
+        <div id="output" class="output">
+          <p class="placeholder">데이터를 불러오고 <b>팀 추천 생성</b>을 누르세요.</p>
+        </div>
+      </section>
+    </main>
+
+    <div id="overlay" class="overlay" style="display:none"><div class="spinner"></div><p>계산 중…</p></div>
+  </div>
+
+  <script src="js/sample.js"></script>
+  <script src="js/teambuilder.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/auth.js"></script>
+</body>
+</html>

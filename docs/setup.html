@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>자격증명 해시 생성 · 팀빌더</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div style="max-width:560px;margin:3rem auto;padding:0 1rem">
+    <div class="panel">
+      <h2>🔐 로그인 자격증명 해시 생성</h2>
+      <p class="muted">새 ID/비밀번호의 해시를 만들어 <code>js/auth.js</code>의
+        <code>CREDENTIAL_HASH</code> 값을 교체하세요. 이 페이지의 입력값은 어디에도 전송되지 않습니다.</p>
+      <div class="field"><label>ID</label><input id="g-id" type="text" style="width:100%" /></div>
+      <div class="field"><label>비밀번호</label><input id="g-pw" type="text" style="width:100%" /></div>
+      <div class="field"><label>SALT (auth.js와 동일해야 함)</label>
+        <input id="g-salt" type="text" style="width:100%" value="hk_teambuilder_v1" /></div>
+      <button class="primary" onclick="gen()">해시 생성</button>
+      <div class="field" style="margin-top:1rem">
+        <label>CREDENTIAL_HASH (복사해서 붙여넣기)</label>
+        <textarea id="g-out" rows="2" readonly placeholder="생성된 해시가 여기에 표시됩니다"></textarea>
+      </div>
+      <p class="muted">⚠️ 정적 페이지 게이트는 난독화 수준입니다. 강한 보안이 필요하면 저장소를 private으로 두세요.</p>
+      <p><a href="index.html">← 앱으로 돌아가기</a></p>
+    </div>
+  </div>
+  <script>
+    async function gen() {
+      const id = document.getElementById("g-id").value.trim();
+      const pw = document.getElementById("g-pw").value;
+      const salt = document.getElementById("g-salt").value;
+      const msg = `${salt}\n${id}\n${pw}`;
+      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(msg));
+      const hex = Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+      document.getElementById("g-out").value = hex;
+    }
+  </script>
+</body>
+</html>
