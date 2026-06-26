@@ -1,0 +1,13 @@
+{
+  "name": "hk-teambuilder-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "수강생 팀빌더 브라우저 E2E (Playwright)",
+  "type": "module",
+  "scripts": {
+    "test": "node e2e.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}

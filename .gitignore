@@ -3,3 +3,7 @@ __pycache__/
 output/*.md
 output/*.csv
 .DS_Store
+
+# E2E 도구 (Playwright)
+tests/e2e/node_modules/
+tests/e2e/package-lock.json

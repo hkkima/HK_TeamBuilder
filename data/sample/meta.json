@@ -1,0 +1,13 @@
+{
+  "n": 23,
+  "seed": 7,
+  "prev_size": 6,
+  "conflict_pairs": [
+    "S03|S04"
+  ],
+  "positive_pairs": [
+    "S02|S05",
+    "S07|S10",
+    "S13|S14"
+  ]
+}
