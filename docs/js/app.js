@@ -71,9 +71,17 @@
     const w = {};
     Object.keys(TB.DEFAULT_WEIGHTS).forEach((k) => {
       const el = $("w-" + k);
-      if (el) w[k] = Number(el.value);
+      if (!el) return;
+      w[k] = (k === "competency_metric") ? el.value : Number(el.value);
     });
     return w;
+  }
+
+  function readConstraints() {
+    return {
+      forceTogether: TB.parsePairLines($("ta-together") ? $("ta-together").value : ""),
+      forceSeparate: TB.parsePairLines($("ta-apart") ? $("ta-apart").value : ""),
+    };
   }
 
   // ---- 실행 ----
@@ -96,6 +104,9 @@
       seed: Number($("seed").value),
       weights: readWeights(),
     };
+    const cons = readConstraints();
+    opt.forceTogether = cons.forceTogether;
+    opt.forceSeparate = cons.forceSeparate;
 
     $("overlay").style.display = "grid";
     setTimeout(function () {
@@ -160,10 +171,19 @@
       }).join("");
 
       const nConf = rec.score.intra.length;
-      const flag = nConf === 0
+      let flag = nConf === 0
         ? '<div class="flag ok">✅ 같은 팀 내 갈등쌍 0개 · 유지된 긍정쌍 ' + rec.score.kept.length + "개</div>"
         : '<div class="flag">⚠️ 분리 못한 갈등쌍 ' + nConf + "개: " +
           rec.score.intra.map((k) => k.replace("|", "-")).join(", ") + "</div>";
+      // 운영진 강제 제약 상태
+      const bt = (rec.score.brokenTogether || []).length;
+      const vs = (rec.score.violatedSeparate || []).length;
+      const hasForced = $("ta-together").value.trim() || $("ta-apart").value.trim();
+      if (hasForced) {
+        flag += (bt + vs === 0)
+          ? '<div class="flag ok">✅ 운영진 강제 규칙 모두 충족</div>'
+          : '<div class="flag">⚠️ 강제 규칙 위반: 결합 ' + bt + '쌍 · 분리 ' + vs + '쌍</div>';
+      }
 
       const teamsHtml = rec.teams.map((team, ti) => {
         const members = team.map((m) => {

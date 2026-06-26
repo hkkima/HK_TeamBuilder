@@ -97,6 +97,22 @@ python build_teams.py \
 6인 1팀이었다면 같은 팀 안에서 서로를 평가한 행들을 그대로 넣으면 됩니다.
 모든 쌍이 평가될 필요는 없습니다.
 
+### `constraints.csv` — 운영진 강제 규칙 (선택)
+운영진이 데이터와 무관하게 특정 쌍을 **강제로 같은 팀** 또는 **강제로 다른 팀**에
+두고 싶을 때 사용합니다. 데이터 기반 갈등/긍정보다 **우선**합니다.
+
+| 컬럼 | 필수 | 설명 |
+|---|---|---|
+| `id_a` | ✅ | 학생 id |
+| `id_b` | ✅ | 학생 id |
+| `type` | ✅ | `together`(강제 결합) 또는 `apart`(강제 분리) |
+
+> 별칭 허용: `together`=강제결합/결합/같이/must, `apart`=강제분리/분리/따로/cannot.
+> CLI: `--constraints constraints.csv`. 웹: 좌측 "운영진 강제 규칙"에 한 줄에 한 쌍씩.
+>
+> 실현 불가능한 경우(같은 쌍을 결합+분리, 결합 그룹이 최대 팀 크기 초과 등)는
+> 사람이 읽을 수 있는 오류 메시지로 즉시 알려줍니다.
+
 ## 관계도가 만들어지는 방식
 
 - 두 사람의 양방향 점수를 평균해 **상호 점수(0~5)** 산출
@@ -111,21 +127,50 @@ python build_teams.py \
 여러 번 재시작(`--restarts`)해 **서로 다른 우수 구성**을 모아 상위 N개를 추천합니다.
 `--seed`로 재현 가능합니다.
 
-## 주요 옵션
+## 추가 고려 사항 파라미터 (강도 · 평준화 · 강제)
 
+세 부류로 설계되어 있습니다.
+
+**① 균형 항목 가중치** — 각 목표를 얼마나 중시할지
+| 파라미터 | 기본 | 의미 |
+|---|---|---|
+| `--w-conflict` | 100 | 갈등 분리(사실상 하드) |
+| `--w-positive` | 8 | 긍정 관계 유지 |
+| `--w-prev-mix` | 6 | 이전 팀 섞기 |
+| `--w-mbti` | 16 | 성향(MBTI) 균형 |
+| `--w-role` | 14 | 역할 배분 |
+| `--w-leader` | 12 | 리더 분포 |
+| `--w-competency` | 6 | 역량 평준화(보조) |
+
+**② 강도(intensity) · 형태** — "갈등의 강도"처럼 *정도*를 반영
+| 파라미터 | 기본 | 의미 |
+|---|---|---|
+| `--conflict-intensity` | 1.0 | 0=모든 갈등 동일 취급, 클수록 **심한 갈등에 더 큰 페널티**. 실효가중 = base·(1+intensity·강도). 강도는 평가점수가 임계 아래로 얼마나 떨어졌는지로 0~1 산출 |
+| `--positive-intensity` | 0.5 | 강한 긍정 쌍을 더 우선 유지 |
+| `--competency-metric` | stdev | 역량 **평준화 방식**: `stdev`(전반 평준화) 또는 `range`(최고-최저 팀 격차 억제) |
+| `--conflict-threshold` | 2.0 | 갈등 분류 임계 |
+| `--positive-threshold` | 4.0 | 긍정 분류 임계 |
+
+**③ 운영진 강제 제약(하드)** — `constraints.csv`로 입력, 가중치는 보통 건드릴 필요 없음
+| 파라미터 | 기본 | 의미 |
+|---|---|---|
+| `--w-force-together` | 1000 | 강제 결합 위반 페널티(데이터 갈등 100보다 훨씬 큼) |
+| `--w-force-separate` | 1000 | 강제 분리 위반 페널티 |
+
+**기타 실행 옵션**
 ```
 --teams N            팀 개수 (자동 균등 분배). 23명, 4팀 → 6/6/6/5
 --sizes 6,6,6,5      팀 크기 직접 지정 (합이 인원수와 같아야 함)
+--constraints f.csv  운영진 강제 규칙 파일
 --options 3          추천안 개수
 --restarts 60        최적화 재시작 횟수 (많을수록 품질↑, 느려짐)
 --seed 42            난수 시드(재현성)
+```
 
-# 가중치 조정 (기본값은 관계/성향 우선, 역량 보조)
---w-conflict 100  --w-positive 8  --w-prev-mix 6
---w-mbti 16  --w-role 14  --w-leader 12  --w-competency 6
-
-# 관계 임계값
---conflict-threshold 2.0   --positive-threshold 4.0
+예시:
+```bash
+python build_teams.py --students s.csv --evals e.csv --constraints c.csv \
+    --teams 4 --conflict-intensity 1.5 --competency-metric range
 ```
 
 ## 출력 리포트 읽는 법
@@ -134,29 +179,40 @@ python build_teams.py \
 - **점수 분해**: 항목별 기여(+/-)와 같은 팀 내 갈등쌍/긍정쌍 개수
 - **팀별**: 멤버(MBTI), 성향분포(4축), 역할 구성, 평균 역량(보조)
 - 분리하지 못한 갈등쌍이 있으면 ⚠️로 표시
+- 운영진 강제 규칙 위반이 있으면 ⚠️로 표시 (정상이면 ✅)
+
+## 테스트
+
+```bash
+python3 tests/test_builder.py   # 단위 테스트(강제 제약·갈등 강도 포함)
+bash   tests/e2e/run.sh         # 10·25·60명 E2E (CLI + 브라우저)
+```
 
 ## 프로젝트 구조
 
 ```
 docs/                     GitHub Pages 정적 웹 앱
-  index.html              로그인 게이트 + 팀빌더 UI
+  index.html              로그인 게이트 + 팀빌더 UI (강제 규칙·고급 파라미터 포함)
   setup.html              로그인 해시 생성기
   css/styles.css          스타일
   js/auth.js              공유 ID/PW 로그인 게이트
-  js/teambuilder.js       알고리즘(파이썬 포팅, 브라우저 실행)
+  js/teambuilder.js       알고리즘(파이썬 포팅, 강제 제약·강도 포함)
   js/app.js               UI 연결·렌더링·CSV 내보내기
   js/sample.js            내장 샘플 데이터
 build_teams.py            CLI 진입점
 teambuilder/
   models.py               데이터 모델(학생/평가/팀), 역할 정규화
-  loader.py               CSV 로딩·검증
-  relationship.py         상호평가 → 관계 그래프(갈등/긍정)
-  scoring.py              구성안 점수화(우선순위별 가중합)
-  builder.py              지역탐색 최적화 + 다중 추천안
+  loader.py               CSV 로딩·검증 (students/evals/constraints)
+  relationship.py         상호평가 → 관계 그래프(갈등/긍정 + 강도)
+  scoring.py              구성안 점수화(가중합 + 강도 + 강제 제약)
+  builder.py              제약 검증·초기배치 + 지역탐색 + 다중 추천안
   report.py               Markdown/CSV 리포트
 data/
-  templates/              입력 템플릿 CSV
+  templates/              입력 템플릿 CSV (students/evals/constraints)
   sample/                 샘플 데이터(make_sample.py로 생성)
-  make_sample.py          재현 가능한 샘플 생성기
+  make_sample.py          재현 가능한 샘플 생성기(파라미터화)
+tests/
+  test_builder.py         파이썬 단위 테스트
+  e2e/                    10·25·60명 E2E (Playwright + CLI)
 output/                   생성된 리포트(gitignore)
 ```

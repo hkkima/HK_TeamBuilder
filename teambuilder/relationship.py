@@ -13,10 +13,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from .models import PeerEval, Student
+
+
+def _clamp01(x: float) -> float:
+    return 0.0 if x < 0 else (1.0 if x > 1 else x)
 
 
 def _key(a: str, b: str) -> tuple[str, str]:
@@ -31,6 +35,10 @@ class RelationshipGraph:
     conflicts: set[tuple[str, str]]
     positives: set[tuple[str, str]]
     n_pairs: int
+    # 강도(intensity) 0~1: 갈등이 얼마나 심한가 / 긍정이 얼마나 강한가.
+    # 임계 바로 옆이면 0에 가깝고, 극단으로 갈수록 1에 가깝다.
+    severity: dict[tuple[str, str], float] = field(default_factory=dict)
+    strength: dict[tuple[str, str], float] = field(default_factory=dict)
 
     def relation(self, a: str, b: str) -> str:
         k = _key(a, b)
@@ -88,12 +96,21 @@ def build_relationship_graph(
 
     conflicts: set[tuple[str, str]] = set()
     positives: set[tuple[str, str]] = set()
+    severity: dict[tuple[str, str], float] = {}
+    strength: dict[tuple[str, str], float] = {}
     for k, avg in pair_score.items():
         # 비대칭 갈등: 한쪽이라도 임계 이하로 강하게 부정하면 갈등.
         if avg <= conflict_threshold or min_directed[k] <= conflict_threshold - 0.5:
             conflicts.add(k)
+            # 강도: 평균과 최저점 중 더 나쁜 값을 기준으로 임계 아래로
+            # 얼마나 떨어졌는지 0~1로 정규화. 임계 옆이면 0, 바닥이면 1.
+            worst = min(avg, min_directed[k])
+            severity[k] = _clamp01((conflict_threshold - worst) / conflict_threshold)
         elif avg >= positive_threshold:
             positives.add(k)
+            # 강도: 임계와 만점(5) 사이에서 얼마나 높은지 0~1.
+            denom = max(1e-9, 5.0 - positive_threshold)
+            strength[k] = _clamp01((avg - positive_threshold) / denom)
 
     return RelationshipGraph(
         pair_score=pair_score,
@@ -101,4 +118,6 @@ def build_relationship_graph(
         conflicts=conflicts,
         positives=positives,
         n_pairs=len(pair_score),
+        severity=severity,
+        strength=strength,
     )

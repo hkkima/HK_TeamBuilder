@@ -51,6 +51,19 @@
         </div>
         <div id="data-status" class="status"></div>
 
+        <details class="adv">
+          <summary>운영진 강제 규칙 (선택)</summary>
+          <p class="muted">한 줄에 한 쌍씩 <code>S01,S02</code> 형식. 데이터보다 우선합니다.</p>
+          <div class="field">
+            <label>강제 결합 (반드시 같은 팀)</label>
+            <textarea id="ta-together" rows="2" placeholder="S01,S07&#10;S03,S10"></textarea>
+          </div>
+          <div class="field">
+            <label>강제 분리 (반드시 다른 팀)</label>
+            <textarea id="ta-apart" rows="2" placeholder="S02,S05"></textarea>
+          </div>
+        </details>
+
         <h2>2. 팀 구성</h2>
         <div class="field inline">
           <label>구성 방식</label>
@@ -93,6 +106,16 @@
             <label>역량(보조)<input id="w-competency_balance" type="number" step="1" value="6" /></label>
             <label>갈등 임계<input id="conflict-th" type="number" step="0.1" value="2.0" /></label>
             <label>긍정 임계<input id="positive-th" type="number" step="0.1" value="4.0" /></label>
+            <label>갈등 강도<input id="w-conflict_intensity" type="number" step="0.1" value="1.0" /></label>
+            <label>긍정 강도<input id="w-positive_intensity" type="number" step="0.1" value="0.5" /></label>
+            <label>강제 결합 W<input id="w-force_together" type="number" step="50" value="1000" /></label>
+            <label>강제 분리 W<input id="w-force_separate" type="number" step="50" value="1000" /></label>
+            <label>역량 평준화 방식
+              <select id="w-competency_metric">
+                <option value="stdev">표준편차(전반 평준화)</option>
+                <option value="range">최대격차(최악 억제)</option>
+              </select>
+            </label>
           </div>
         </details>
 

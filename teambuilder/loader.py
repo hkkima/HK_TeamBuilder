@@ -99,3 +99,46 @@ def load_peer_evals(path: str, valid_ids: set[str]) -> list[PeerEval]:
                 )
             )
     return evals
+
+
+def _ckey(a: str, b: str) -> tuple[str, str]:
+    return (a, b) if a <= b else (b, a)
+
+
+def load_constraints(
+    path: str, valid_ids: set
+) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+    """운영진 강제 제약 CSV 로딩.
+
+    컬럼: id_a, id_b, type
+      type ∈ {together, apart}
+      별칭: 강제결합/결합/같이/must → together,
+            강제분리/분리/따로/cannot → apart
+    반환: (force_together, force_separate)  각각 정렬된 쌍 키 집합.
+    """
+    together: set[tuple[str, str]] = set()
+    apart: set[tuple[str, str]] = set()
+    alias = {
+        "together": "together", "강제결합": "together", "결합": "together",
+        "같이": "together", "must": "together", "must-link": "together",
+        "apart": "apart", "강제분리": "apart", "분리": "apart",
+        "따로": "apart", "cannot": "apart", "cannot-link": "apart",
+    }
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        reader = csv.DictReader(fh)
+        for ln, row in enumerate(reader, start=2):
+            a = _s(row, "id_a", "a", "id1")
+            b = _s(row, "id_b", "b", "id2")
+            if not a or not b:
+                continue
+            if a == b:
+                raise ValueError(f"같은 학생끼리의 제약 (line {ln})")
+            if a not in valid_ids or b not in valid_ids:
+                raise ValueError(
+                    f"제약에 등록되지 않은 id (a={a}, b={b}, line {ln})")
+            t = alias.get(_s(row, "type", "kind", "유형").lower())
+            if t is None:
+                raise ValueError(
+                    f"알 수 없는 제약 유형 '{_s(row, 'type')}' (line {ln})")
+            (together if t == "together" else apart).add(_ckey(a, b))
+    return together, apart

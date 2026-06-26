@@ -9,6 +9,8 @@ from .models import MBTI_AXES, STANDARD_ROLES, Team
 from .relationship import RelationshipGraph
 
 PART_LABELS = {
+    "force_together": "강제 결합",
+    "force_separate": "강제 분리",
     "conflict": "갈등 분리",
     "positive": "긍정 관계 유지",
     "prev_mix": "이전 팀 섞기",
@@ -55,6 +57,11 @@ def render_recommendation(
     n_conf = len(rec.score.intra_conflicts)
     n_pos = len(rec.score.kept_positives)
     lines.append(f"- → 같은 팀 내 갈등쌍 **{n_conf}개**, 유지된 긍정쌍 {n_pos}개")
+    # 운영진 강제 제약 충족 여부
+    bt = len(rec.score.broken_together)
+    vs = len(rec.score.violated_separate)
+    if bt or vs:
+        lines.append(f"- → ⚠️ 강제 제약 위반: 결합 {bt}쌍, 분리 {vs}쌍")
     lines.append("")
 
     for team in rec.teams:

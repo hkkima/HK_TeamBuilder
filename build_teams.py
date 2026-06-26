@@ -17,7 +17,7 @@ import os
 import sys
 
 from teambuilder.builder import build_recommendations
-from teambuilder.loader import load_peer_evals, load_students
+from teambuilder.loader import load_constraints, load_peer_evals, load_students
 from teambuilder.relationship import build_relationship_graph
 from teambuilder.report import render_report, write_csv
 from teambuilder.scoring import Weights
@@ -28,6 +28,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         description="관계도+성향 우선 수강생 팀빌더 (역량은 보조)")
     p.add_argument("--students", required=True, help="students.csv 경로")
     p.add_argument("--evals", help="peer_evaluations.csv 경로 (선택)")
+    p.add_argument("--constraints",
+                   help="운영진 강제 제약 CSV (id_a,id_b,type=together|apart)")
 
     grp = p.add_mutually_exclusive_group(required=True)
     grp.add_argument("--teams", type=int, help="팀 개수 (자동 균등 분배)")
@@ -47,6 +49,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--w-role", type=float)
     p.add_argument("--w-leader", type=float)
     p.add_argument("--w-competency", type=float)
+    p.add_argument("--w-force-together", type=float, help="강제 결합 가중치")
+    p.add_argument("--w-force-separate", type=float, help="강제 분리 가중치")
+
+    # 강도/형태 파라미터
+    p.add_argument("--conflict-intensity", type=float,
+                   help="갈등 강도 반영(0=균일, 클수록 심한 갈등 가중)")
+    p.add_argument("--positive-intensity", type=float,
+                   help="긍정 강도 반영(0=균일, 클수록 강한 긍정 우선)")
+    p.add_argument("--competency-metric", choices=["stdev", "range"],
+                   help="역량 평준화 지표 (기본 stdev)")
 
     # 관계 임계값
     p.add_argument("--conflict-threshold", type=float, default=2.0)
@@ -70,15 +82,30 @@ def build_weights(a: argparse.Namespace) -> Weights:
         w.leader_balance = a.w_leader
     if a.w_competency is not None:
         w.competency_balance = a.w_competency
+    if a.w_force_together is not None:
+        w.force_together = a.w_force_together
+    if a.w_force_separate is not None:
+        w.force_separate = a.w_force_separate
+    if a.conflict_intensity is not None:
+        w.conflict_intensity = a.conflict_intensity
+    if a.positive_intensity is not None:
+        w.positive_intensity = a.positive_intensity
+    if a.competency_metric is not None:
+        w.competency_metric = a.competency_metric
     return w
 
 
 def main(argv: list[str]) -> int:
     a = parse_args(argv)
     students = load_students(a.students)
+    ids = {s.id for s in students}
     evals = []
     if a.evals:
-        evals = load_peer_evals(a.evals, {s.id for s in students})
+        evals = load_peer_evals(a.evals, ids)
+
+    force_together, force_separate = set(), set()
+    if a.constraints:
+        force_together, force_separate = load_constraints(a.constraints, ids)
 
     graph = build_relationship_graph(
         students, evals,
@@ -94,6 +121,7 @@ def main(argv: list[str]) -> int:
         students, graph,
         teams=a.teams, sizes=sizes,
         weights=build_weights(a),
+        force_together=force_together, force_separate=force_separate,
         n_options=a.options, restarts=a.restarts, seed=a.seed,
     )
 

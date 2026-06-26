@@ -136,18 +136,31 @@
       minDirected.set(k, Math.min.apply(null, vals));
     }
 
+    const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
     const conflicts = new Set(), positives = new Set();
+    const severity = new Map(), strength = new Map();
     for (const [k, avg] of pairScore) {
-      if (avg <= conflictT || minDirected.get(k) <= conflictT - 0.5) conflicts.add(k);
-      else if (avg >= positiveT) positives.add(k);
+      if (avg <= conflictT || minDirected.get(k) <= conflictT - 0.5) {
+        conflicts.add(k);
+        const worst = Math.min(avg, minDirected.get(k));
+        severity.set(k, clamp01((conflictT - worst) / conflictT));
+      } else if (avg >= positiveT) {
+        positives.add(k);
+        const denom = Math.max(1e-9, 5.0 - positiveT);
+        strength.set(k, clamp01((avg - positiveT) / denom));
+      }
     }
-    return { pairScore, minDirected, conflicts, positives, nPairs: pairScore.size };
+    return { pairScore, minDirected, conflicts, positives, severity, strength, nPairs: pairScore.size };
   }
 
   // ---- 점수화 ----------------------------------------------------------
   const DEFAULT_WEIGHTS = {
     conflict: 100, positive: 8, prev_mix: 6,
     mbti_balance: 16, role_coverage: 14, leader_balance: 12, competency_balance: 6,
+    // 강도/형태
+    conflict_intensity: 1.0, positive_intensity: 0.5, competency_metric: "stdev",
+    // 운영진 강제 제약(하드)
+    force_together: 1000, force_separate: 1000,
   };
 
   function pstdev(arr) {
@@ -193,38 +206,55 @@
     return have / teams.length;
   }
 
-  function competencyStd(teams) {
+  function competencyMetric(teams, metric) {
     const avgs = [];
     for (const team of teams) {
       const v = team.filter((m) => m.instructor_score != null).map((m) => m.instructor_score);
       if (v.length) avgs.push(v.reduce((s, x) => s + x, 0) / v.length);
     }
-    return avgs.length < 2 ? 0 : pstdev(avgs);
+    if (avgs.length < 2) return 0;
+    if (metric === "range") return Math.max(...avgs) - Math.min(...avgs);
+    return pstdev(avgs);
   }
 
-  function scorePartition(teams, graph, w) {
-    const intra = [], kept = [];
-    let prevMix = 0;
+  function scorePartition(teams, graph, w, forceTogether, forceSeparate) {
+    forceTogether = forceTogether || new Set();
+    forceSeparate = forceSeparate || new Set();
+    const intra = [], kept = [], violatedSeparate = [];
+    let conflictPenalty = 0, positiveBonus = 0, prevMix = 0;
+    const sameTeam = new Set();
     for (const team of teams) {
       for (let i = 0; i < team.length; i++)
         for (let j = i + 1; j < team.length; j++) {
           const a = team[i], b = team[j], k = pairKey(a.id, b.id);
-          if (graph.conflicts.has(k)) intra.push(k);
-          else if (graph.positives.has(k)) kept.push(k);
+          sameTeam.add(k);
+          if (graph.conflicts.has(k)) {
+            intra.push(k);
+            conflictPenalty += w.conflict * (1 + w.conflict_intensity * (graph.severity.get(k) || 0));
+          } else if (graph.positives.has(k)) {
+            kept.push(k);
+            positiveBonus += w.positive * (1 + w.positive_intensity * (graph.strength.get(k) || 0));
+          }
+          if (forceSeparate.has(k)) violatedSeparate.push(k);
           if (a.prev_team && b.prev_team && a.prev_team === b.prev_team) prevMix++;
         }
     }
+    const brokenTogether = [];
+    forceTogether.forEach((k) => { if (!sameTeam.has(k)) brokenTogether.push(k); });
+
     const parts = {
-      conflict: -w.conflict * intra.length,
-      positive: +w.positive * kept.length,
+      conflict: -conflictPenalty,
+      positive: +positiveBonus,
       prev_mix: -w.prev_mix * prevMix,
       mbti_balance: +w.mbti_balance * mbtiBalance(teams),
       role_coverage: +w.role_coverage * roleCoverage(teams),
       leader_balance: +w.leader_balance * leaderBalance(teams),
-      competency_balance: -w.competency_balance * competencyStd(teams),
+      competency_balance: -w.competency_balance * competencyMetric(teams, w.competency_metric),
+      force_together: -w.force_together * brokenTogether.length,
+      force_separate: -w.force_separate * violatedSeparate.length,
     };
     let total = 0; for (const k in parts) total += parts[k];
-    return { total, parts, intra, kept };
+    return { total, parts, intra, kept, brokenTogether, violatedSeparate };
   }
 
   // ---- 시드 RNG (Mulberry32) ------------------------------------------
@@ -267,9 +297,89 @@
     return teams.map((t) => t.map((m) => m.id).sort().join(",")).sort().join("|");
   }
 
-  function localSearch(students, assign, sizes, graph, w, rng, maxIter) {
+  // ---- 강제 제약: union-find 그룹화 / 검증 / 초기 배치 ----------------
+  function pairsToSet(pairs) {
+    // pairs: [[idA, idB], ...] → Set(pairKey)
+    const s = new Set();
+    (pairs || []).forEach(([a, b]) => { if (a && b && a !== b) s.add(pairKey(a, b)); });
+    return s;
+  }
+
+  function buildGroups(ids, forceTogether) {
+    const idx = new Map(ids.map((id, i) => [id, i]));
+    const parent = ids.map((_, i) => i);
+    const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    forceTogether.forEach((k) => {
+      const [a, b] = k.split("|");
+      const ra = find(idx.get(a)), rb = find(idx.get(b));
+      if (ra !== rb) parent[ra] = rb;
+    });
+    const groups = new Map();
+    ids.forEach((_, i) => { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(i); });
+    return Array.from(groups.values());
+  }
+
+  function validateConstraints(students, sizes, forceTogether, forceSeparate) {
+    const ids = students.map((s) => s.id);
+    const idSet = new Set(ids);
+    [forceTogether, forceSeparate].forEach((set) => set.forEach((k) => {
+      const [a, b] = k.split("|");
+      if (!idSet.has(a) || !idSet.has(b)) throw new Error(`제약에 없는 학생 id: ${a}, ${b}`);
+    }));
+    const groups = buildGroups(ids, forceTogether);
+    const idx = new Map(ids.map((id, i) => [id, i]));
+    const memberGroup = new Map();
+    groups.forEach((g, gi) => g.forEach((i) => memberGroup.set(i, gi)));
+    const maxTeam = Math.max(...sizes);
+    for (const g of groups)
+      if (g.length > maxTeam)
+        throw new Error(`강제 결합 그룹 크기(${g.length})가 최대 팀 크기(${maxTeam})를 초과: ` + g.map((i) => ids[i]).join(", "));
+    forceSeparate.forEach((k) => {
+      const [a, b] = k.split("|");
+      if (memberGroup.get(idx.get(a)) === memberGroup.get(idx.get(b)))
+        throw new Error(`${a}, ${b}는 강제 결합으로 묶여 있어 분리할 수 없습니다(모순).`);
+    });
+    return groups;
+  }
+
+  function seedAssignment(students, sizes, groups, forceSeparate, rng) {
+    const ids = students.map((s) => s.id);
+    const nTeams = sizes.length;
+    const remaining = sizes.slice();
+    const assign = new Array(students.length).fill(-1);
+    const inTeam = Array.from({ length: nTeams }, () => new Set());
+    const sepPartners = new Map();
+    forceSeparate.forEach((k) => {
+      const [a, b] = k.split("|");
+      if (!sepPartners.has(a)) sepPartners.set(a, new Set());
+      if (!sepPartners.has(b)) sepPartners.set(b, new Set());
+      sepPartners.get(a).add(b); sepPartners.get(b).add(a);
+    });
+    const order = groups.map((_, gi) => gi)
+      .sort((x, y) => (groups[y].length - groups[x].length) || (rng() - 0.5));
+    for (const gi of order) {
+      const grp = groups[gi], size = grp.length, gids = grp.map((i) => ids[i]);
+      let cand = [];
+      for (let t = 0; t < nTeams; t++) if (remaining[t] >= size) cand.push(t);
+      if (!cand.length) return null;
+      const sepCost = (t) => {
+        let c = 0;
+        gids.forEach((gid) => (sepPartners.get(gid) || new Set()).forEach((p) => { if (inTeam[t].has(p)) c++; }));
+        return c;
+      };
+      shuffle(cand, rng);
+      cand.sort((a, b) => sepCost(a) - sepCost(b));
+      const t = cand[0];
+      grp.forEach((i) => { assign[i] = t; inTeam[t].add(ids[i]); });
+      remaining[t] -= size;
+    }
+    return assign;
+  }
+
+  function localSearch(students, assign, sizes, graph, w, rng, maxIter, fT, fS) {
     const nTeams = sizes.length, n = students.length;
-    let best = scorePartition(partitionFrom(students, assign, nTeams), graph, w);
+    const score = (a) => scorePartition(partitionFrom(students, a, nTeams), graph, w, fT, fS);
+    let best = score(assign);
     for (let it = 0; it < maxIter; it++) {
       let improved = false;
       const order = shuffle(Array.from({ length: n }, (_, i) => i), rng);
@@ -279,7 +389,7 @@
           const j = order[jj];
           if (assign[i] === assign[j]) continue;
           [assign[i], assign[j]] = [assign[j], assign[i]];
-          const cand = scorePartition(partitionFrom(students, assign, nTeams), graph, w);
+          const cand = score(assign);
           if (cand.total > best.total + 1e-9) { best = cand; improved = true; break; }
           [assign[i], assign[j]] = [assign[j], assign[i]];
         }
@@ -298,14 +408,16 @@
     const restarts = opt.restarts != null ? opt.restarts : 60;
     const maxIter = opt.maxIter != null ? opt.maxIter : 40;
     const nOptions = opt.nOptions != null ? opt.nOptions : 3;
+    const fT = opt.forceTogether instanceof Set ? opt.forceTogether : pairsToSet(opt.forceTogether);
+    const fS = opt.forceSeparate instanceof Set ? opt.forceSeparate : pairsToSet(opt.forceSeparate);
+
+    const groups = validateConstraints(students, sizes, fT, fS);
 
     const found = new Map();
     for (let r = 0; r < restarts; r++) {
-      const slots = [];
-      sizes.forEach((sz, ti) => { for (let k = 0; k < sz; k++) slots.push(ti); });
-      shuffle(slots, rng);
-      const assign = slots.slice();
-      const sb = localSearch(students, assign, sizes, graph, w, rng, maxIter);
+      const assign = seedAssignment(students, sizes, groups, fS, rng);
+      if (assign === null) throw new Error("강제 제약을 만족하는 초기 배치를 찾지 못했습니다. 팀 크기나 제약을 조정하세요.");
+      const sb = localSearch(students, assign, sizes, graph, w, rng, maxIter, fT, fS);
       const partition = partitionFrom(students, assign, nTeams);
       const sig = signature(partition);
       if (!found.has(sig) || sb.total > found.get(sig).score.total)
@@ -314,9 +426,22 @@
     return Array.from(found.values()).sort((a, b) => b.score.total - a.score.total).slice(0, nOptions);
   }
 
+  // 텍스트(줄당 "S01,S02") → [[a,b], ...]
+  function parsePairLines(text) {
+    const out = [];
+    (text || "").split(/\r?\n/).forEach((line) => {
+      const t = line.trim();
+      if (!t || t.startsWith("#")) return;
+      const parts = t.split(/[,\t]/).map((x) => x.trim()).filter(Boolean);
+      if (parts.length >= 2) out.push([parts[0], parts[1]]);
+    });
+    return out;
+  }
+
   global.TeamBuilder = {
     parseCSV, loadStudents, loadEvals, buildGraph, scorePartition,
-    buildRecommendations, sizesFor, pairKey,
+    buildRecommendations, sizesFor, pairKey, pairsToSet, validateConstraints,
+    parsePairLines,
     MBTI_AXES, STANDARD_ROLES, ROLE, DEFAULT_WEIGHTS,
   };
 })(window);

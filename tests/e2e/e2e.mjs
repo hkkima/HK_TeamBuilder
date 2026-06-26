@@ -96,6 +96,9 @@ async function run() {
 
     await login(page, base, CREDENTIALS.id, CREDENTIALS.pw);
     await page.waitForSelector("#app", { state: "visible", timeout: 5000 });
+    // 접힌 <details>(강제 규칙/고급 설정) 펼쳐서 입력 가능하게
+    await page.evaluate(() =>
+      document.querySelectorAll("details").forEach((d) => { d.open = true; }));
     check(true, "올바른 자격증명 → 앱 진입");
 
     // === 2) 규모별 팀 빌딩 ===
@@ -103,6 +106,9 @@ async function run() {
       console.log(`\n[N=${c.n}명 · ${c.teams}팀]`);
       const data = genData(c.n);
 
+      // 이전 케이스의 강제 규칙 잔여값 제거
+      await page.fill("#ta-together", "");
+      await page.fill("#ta-apart", "");
       await page.fill("#ta-students", data.students);
       await page.fill("#ta-evals", data.evals);
       // 인식 상태 갱신 대기
@@ -176,6 +182,46 @@ async function run() {
         check(lines.length === expected,
           `CSV 내보내기 행 수 ${lines.length} = 1+${result.recs.length}×${c.n}`);
         check(lines[0].startsWith("option,team,id,name"), "CSV 헤더 정상");
+      }
+
+      // === 운영진 강제 규칙 (N=25에서) ===
+      if (c.n === 25) {
+        console.log("[운영진 강제 규칙: S02+S20 결합 / S05-S06 분리]");
+        await page.fill("#ta-together", "S02,S20");
+        await page.fill("#ta-apart", "S05,S06");
+        await page.click("#btn-run");
+        await page.waitForSelector("#output .rec", { timeout: 90000 });
+        await page.waitForFunction(
+          () => document.getElementById("overlay").style.display === "none",
+          null, { timeout: 90000 });
+
+        // 강제 규칙 충족 플래그
+        const okForced = await page.evaluate(() =>
+          document.querySelector("#output .rec").innerText.includes("강제 규칙 모두 충족"));
+        check(okForced, "최상위 추천안: 운영진 강제 규칙 모두 충족(✅)");
+
+        // CSV로 실제 배치 검증
+        const [dl2] = await Promise.all([
+          page.waitForEvent("download", { timeout: 10000 }),
+          page.click("#btn-export"),
+        ]);
+        const csv2 = readFileSync(await dl2.path(), "utf-8").replace(/^﻿/, "");
+        const team = {};
+        csv2.trim().split("\n").slice(1).forEach((ln) => {
+          const [opt, tm, id] = ln.split(",");
+          if (opt === "1") team[id] = tm;
+        });
+        check(team.S02 === team.S20, `강제 결합: S02·S20 같은 팀(${team.S02})`);
+        check(team.S05 !== team.S06, `강제 분리: S05·S06 다른 팀(${team.S05}/${team.S06})`);
+
+        // 모순 제약 → 오류 표시 검증
+        await page.fill("#ta-together", "S05,S06");
+        await page.fill("#ta-apart", "S05,S06");
+        await page.click("#btn-run");
+        await page.waitForFunction(
+          () => /오류|모순/.test(document.getElementById("output").innerText),
+          null, { timeout: 90000 });
+        check(true, "모순 제약(결합+분리 동일 쌍) → 오류 메시지");
       }
     }
   } finally {
