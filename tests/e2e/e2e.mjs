@@ -166,14 +166,20 @@ async function run() {
         await page.click('#comp-list .comp-chip[data-idx="0"]'); // 1번으로 복귀
       }
 
-      // === 드래그&드롭 · 저장 · CSV (N=25) ===
+      // === 드래그&드롭 · 팀장 · 메모 · 저장 · CSV (N=25) ===
       if (c.n === 25) {
         console.log("[드래그&드롭 편성 수정]");
         const cur = await snap();
         const srcId = cur.teams[0][0];
-        await page.locator(`#board .block[data-id="${srcId}"]`)
-          .dragTo(page.locator("#board .teams-grid .team-col").nth(1));
+        // HTML5 DnD 이벤트를 정확한 요소에 직접 디스패치(좌표 기반 dragTo의 오조준 회피)
         const moved = await page.evaluate((sid) => {
+          const src = document.querySelector(`#board .block[data-id="${sid}"]`);
+          const dst = document.querySelector('#board .team-col[data-zone="team-1"]');
+          const dt = new DataTransfer();
+          src.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: dt }));
+          dst.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer: dt }));
+          dst.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: dt }));
+          src.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: dt }));
           const teams = [...document.querySelectorAll("#board .teams-grid .team-col")].map((col) =>
             [...col.querySelectorAll(".block")].map((b) => b.dataset.id));
           return { inT1: teams[0].includes(sid), inT2: teams[1].includes(sid),
@@ -184,22 +190,51 @@ async function run() {
         check(moved.total === c.n, "이동 후에도 전원 유지");
         check(moved.dirty, "이동 후 '미저장 변경' 표시");
 
+        console.log("[팀장 지정 · 팀 메모]");
+        const leadId = (await snap()).teams[0][0]; // 팀1 첫 블럭
+        await page.click(`#board .block[data-id="${leadId}"] .btn-leader`);
+        const led = await page.evaluate((id) => ({
+          onBlock: document.querySelector(`#board .block[data-id="${id}"]`).classList.contains("leader"),
+          headerHas: document.querySelector("#board .teams-grid .team-col").innerText.includes("팀장"),
+        }), leadId);
+        check(led.onBlock && led.headerHas, `팀장 지정: ${leadId} 표시`);
+
+        const NOTE = "역량 보강 필요";
+        await page.fill("#board .teams-grid .team-col:nth-child(1) .team-note", NOTE);
+        const noteVal = await page.$eval(
+          "#board .teams-grid .team-col:nth-child(1) .team-note", (el) => el.value);
+        check(noteVal === NOTE, "팀 메모 입력 반영");
+
         console.log("[현재 조합 저장]");
         await page.click("#btn-save-comp");
         const afterSave = await snap();
         check(afterSave.chips.length === 4, `저장 후 목록 4개 (${afterSave.chips.length})`);
         check(afterSave.chips.some((c2) => c2.text.includes("저장")), "저장 조합 칩 생성");
 
+        // 다른 조합 갔다가 저장본으로 복귀 → 팀장/메모 유지
+        await page.click('#comp-list .comp-chip[data-idx="0"]');
+        await page.click('#comp-list .comp-chip[data-idx="3"]');
+        const restored = await page.evaluate((id) => ({
+          leader: document.querySelector(`#board .block[data-id="${id}"]`) &&
+            document.querySelector(`#board .block[data-id="${id}"]`).classList.contains("leader"),
+          note: document.querySelector("#board .teams-grid .team-col:nth-child(1) .team-note").value,
+        }), leadId);
+        check(restored.leader, "저장·재로드 후 팀장 유지");
+        check(restored.note === NOTE, "저장·재로드 후 메모 유지");
+
         console.log("[CSV 내보내기]");
         const [dl] = await Promise.all([
           page.waitForEvent("download", { timeout: 10000 }),
           page.click("#btn-export"),
         ]);
-        const lines = readFileSync(await dl.path(), "utf-8").replace(/^﻿/, "").trim().split("\n");
-        // 헤더 1 + 조합 4개 × N
+        const csvText = readFileSync(await dl.path(), "utf-8").replace(/^﻿/, "");
+        const lines = csvText.trim().split("\n");
         check(lines.length === 1 + afterSave.chips.length * c.n,
           `CSV 행 수 ${lines.length} = 1+${afterSave.chips.length}×${c.n}`);
-        check(lines[0].startsWith("composition,team,id,name"), "CSV 헤더 정상");
+        check(lines[0].startsWith("composition,team,team_note,is_leader,id,name"),
+          "CSV 헤더에 team_note·is_leader 포함");
+        check(lines.some((ln) => ln.split(",")[3] === "Y"), "CSV에 팀장(is_leader=Y) 행 존재");
+        check(csvText.includes(NOTE), "CSV에 팀 메모 포함");
       }
 
       // === 운영진 강제 규칙 (N=25) ===

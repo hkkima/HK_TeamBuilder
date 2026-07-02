@@ -144,6 +144,8 @@
         state.compositions = recs.map((rec, i) => ({
           name: "추천안 " + (i + 1), src: "추천",
           teams: rec.teams.map((t) => t.map((m) => m.id)),
+          notes: rec.teams.map(() => ""),
+          leaderByTeam: rec.teams.map(() => null),
         }));
         state.saveCounter = 0;
         loadComposition(0);
@@ -168,7 +170,10 @@
     try { loadInputs(); }
     catch (err) { setStatus("입력 오류: " + err.message, "bad"); return; }
     const n = teamCountFromSettings();
-    state.board = { teams: Array.from({ length: n }, () => []), pool: state.students.map((s) => s.id) };
+    state.board = {
+      teams: Array.from({ length: n }, () => []), pool: state.students.map((s) => s.id),
+      notes: Array.from({ length: n }, () => ""), leaderByTeam: Array.from({ length: n }, () => null),
+    };
     state.activeIndex = -1;
     state.dirty = true;
     state.selectedId = null;
@@ -180,7 +185,12 @@
   function loadComposition(i) {
     const c = state.compositions[i];
     if (!c) return;
-    state.board = { teams: c.teams.map((t) => t.slice()), pool: [] };
+    state.board = {
+      teams: c.teams.map((t) => t.slice()),
+      pool: [],
+      notes: (c.notes || c.teams.map(() => "")).slice(),
+      leaderByTeam: (c.leaderByTeam || c.teams.map(() => null)).slice(),
+    };
     state.activeIndex = i;
     state.dirty = false;
     state.selectedId = null;
@@ -195,6 +205,8 @@
     state.compositions.push({
       name: "저장 " + state.saveCounter, src: "저장",
       teams: state.board.teams.map((t) => t.slice()),
+      notes: state.board.notes.slice(),
+      leaderByTeam: state.board.leaderByTeam.slice(),
     });
     state.activeIndex = state.compositions.length - 1;
     state.dirty = false;
@@ -219,10 +231,31 @@
     const pidx = state.board.pool.indexOf(id);
     if (pidx >= 0) { state.board.pool.splice(pidx, 1); removed = true; }
     if (!removed) return;
+    // 팀을 떠나면 팀장 역할도 해제 (팀장은 팀에 귀속)
+    state.board.leaderByTeam.forEach((lid, ti) => { if (lid === id) state.board.leaderByTeam[ti] = null; });
     if (targetZone === "pool") state.board.pool.push(id);
     else state.board.teams[Number(targetZone.split("-")[1])].push(id);
     state.dirty = true;
     renderAll();
+  }
+
+  function teamOf(id) {
+    for (let ti = 0; ti < state.board.teams.length; ti++)
+      if (state.board.teams[ti].indexOf(id) >= 0) return ti;
+    return -1;
+  }
+  function toggleLeader(id) {
+    const ti = teamOf(id);
+    if (ti < 0) return; // 미배정은 팀장 불가
+    state.board.leaderByTeam[ti] = state.board.leaderByTeam[ti] === id ? null : id;
+    state.dirty = true;
+    renderAll();
+  }
+  // 보드 재렌더 없이 메타(메모)만 반영해 입력 포커스 유지
+  function markDirtyMeta() {
+    state.dirty = true;
+    renderCompList();
+    renderMetrics();
   }
 
   // ---- 점수 계산 ----
@@ -305,13 +338,16 @@
     return sb;
   }
 
-  function blockHtml(m, marker) {
-    const cls = "block" + (marker ? " " + marker : "") + (state.selectedId === m.id ? " selected" : "");
+  function blockHtml(m, marker, isLeader, inPool) {
+    const cls = "block" + (marker ? " " + marker : "") + (isLeader ? " leader" : "") +
+      (state.selectedId === m.id ? " selected" : "");
     const role = m.primary_role ? `<span class="role-tag">${escapeHtml(m.primary_role)}</span>` : "";
     const comp = m.instructor_score != null ? `<span class="comp-val">역량 ${m.instructor_score}</span>` : "";
+    const crown = inPool ? "" :
+      `<button class="btn-leader${isLeader ? " on" : ""}" data-id="${escapeHtml(m.id)}" title="팀장 지정/해제">👑</button>`;
     return `<div class="${cls}" draggable="true" data-id="${escapeHtml(m.id)}">
       <div class="b-top"><span class="prev-dot" style="background:${prevColor(m.prev_team)}" title="이전팀 ${escapeHtml(m.prev_team || "-")}"></span>
-        <span class="mbti">${escapeHtml(m.mbti || "–")}</span><span class="b-name">${escapeHtml(m.name)}</span></div>
+        <span class="mbti">${escapeHtml(m.mbti || "–")}</span><span class="b-name">${escapeHtml(m.name)}</span>${crown}</div>
       <div class="b-sub">${role}${comp}</div></div>`;
   }
 
@@ -329,7 +365,7 @@
     const pool = studentsOf(state.board.pool);
     html += `<div class="team-col pool" data-zone="pool">
       <div class="team-head"><div class="team-title">미배정 <span class="tcount">${pool.length}명</span></div></div>
-      <div class="dropzone">${pool.map((m) => blockHtml(m, markerOf(m.id))).join("")}</div></div>`;
+      <div class="dropzone">${pool.map((m) => blockHtml(m, markerOf(m.id), false, true)).join("")}</div></div>`;
 
     // 팀들
     html += '<div class="teams-grid">';
@@ -339,12 +375,17 @@
         const [a, b] = k.split("|"); return ids.includes(a) && ids.includes(b);
       }).length;
       const warn = teamConf ? `<div class="team-warn">⚠️ 갈등쌍 ${teamConf}</div>` : "";
+      const leadId = state.board.leaderByTeam[ti];
+      const leadName = leadId && state.byId.get(leadId) ? escapeHtml(state.byId.get(leadId).name) : "미지정";
+      const note = state.board.notes[ti] || "";
       return `<div class="team-col" data-zone="team-${ti}">
         <div class="team-head">
           <div class="team-title">팀 ${ti + 1} <span class="tcount">${members.length}명</span></div>
-          <div class="team-meta">${mbtiDist(members)} · ${rolesIn(members)} · 역량 ${avgComp(members)}</div>${warn}
+          <div class="team-meta">${mbtiDist(members)} · ${rolesIn(members)} · 역량 ${avgComp(members)}</div>
+          <div class="team-leader">👑 팀장: ${leadName}</div>${warn}
+          <textarea class="team-note" data-team="${ti}" rows="1" placeholder="운영자 메모…">${escapeHtml(note)}</textarea>
         </div>
-        <div class="dropzone">${members.map((m) => blockHtml(m, markerOf(m.id))).join("")}</div></div>`;
+        <div class="dropzone">${members.map((m) => blockHtml(m, markerOf(m.id), leadId === m.id, false)).join("")}</div></div>`;
     }).join("");
     html += "</div>";
     // 풀을 팀 위가 아니라 아래로 두고 싶으면 순서 조정 가능. 여기선 상단 유지.
@@ -364,11 +405,14 @@
   // ---- CSV 내보내기 (목록의 모든 조합) ----
   function exportCsv() {
     if (!state.compositions.length) { setStatus("내보낼 조합이 없습니다. 먼저 저장하세요.", "bad"); return; }
-    let csv = "﻿composition,team,id,name,mbti,primary_role,secondary_role,instructor_score,prev_team\n";
+    let csv = "﻿composition,team,team_note,is_leader,id,name,mbti,primary_role,secondary_role,instructor_score,prev_team\n";
     state.compositions.forEach((c) => {
+      const notes = c.notes || c.teams.map(() => "");
+      const leaders = c.leaderByTeam || c.teams.map(() => null);
       c.teams.forEach((ids, ti) => {
         studentsOf(ids).forEach((m) => {
-          const cells = [c.name, ti + 1, m.id, m.name, m.mbti, m.primary_role || "",
+          const cells = [c.name, ti + 1, notes[ti] || "", leaders[ti] === m.id ? "Y" : "",
+            m.id, m.name, m.mbti, m.primary_role || "",
             m.secondary_role || "", m.instructor_score == null ? "" : m.instructor_score, m.prev_team || ""];
           csv += cells.map((v) => { const s = String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(",") + "\n";
         });
@@ -405,12 +449,32 @@
       if (hovered) { hovered.classList.remove("drag-over"); hovered = null; }
       if (id) moveStudent(id, col.dataset.zone);
     });
-    // 클릭 이동 폴백(모바일/트랙패드)
+    // 클릭: 팀장 토글 / 메모는 무시 / 블럭 선택 / 선택 후 팀 클릭 이동
     board.addEventListener("click", (e) => {
+      const crown = e.target.closest(".btn-leader");
+      if (crown) { e.stopPropagation(); toggleLeader(crown.dataset.id); return; }
+      if (e.target.closest(".team-note")) return; // 메모 입력은 이동 트리거 안 함
       const blk = e.target.closest(".block");
-      if (blk) { state.selectedId = state.selectedId === blk.dataset.id ? null : blk.dataset.id; renderAll(); return; }
+      if (blk) {
+        // 이미 다른 블럭을 고른 상태면, 클릭한 블럭이 속한 팀으로 이동(가득 찬 팀에도 배치 가능)
+        if (state.selectedId && state.selectedId !== blk.dataset.id) {
+          const id = state.selectedId; state.selectedId = null;
+          const ti = teamOf(blk.dataset.id);
+          moveStudent(id, ti >= 0 ? "team-" + ti : "pool");
+          return;
+        }
+        state.selectedId = state.selectedId === blk.dataset.id ? null : blk.dataset.id;
+        renderAll(); return;
+      }
       const col = e.target.closest(".team-col");
       if (col && state.selectedId) { const id = state.selectedId; state.selectedId = null; moveStudent(id, col.dataset.zone); }
+    });
+    // 팀 메모 입력 (보드 재렌더 없이 상태만 갱신 → 포커스 유지)
+    board.addEventListener("input", (e) => {
+      const ta = e.target.closest(".team-note");
+      if (!ta) return;
+      state.board.notes[Number(ta.dataset.team)] = ta.value;
+      markDirtyMeta();
     });
   }
 
