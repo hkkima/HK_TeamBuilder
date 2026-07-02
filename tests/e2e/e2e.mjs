@@ -124,102 +124,112 @@ async function run() {
       await page.fill("#seed", "42");
 
       await page.click("#btn-run");
-      await page.waitForSelector("#output .rec", { timeout: 90000 });
+      await page.waitForSelector("#board .teams-grid .team-col", { timeout: 90000 });
       await page.waitForFunction(
         () => document.getElementById("overlay").style.display === "none",
         null, { timeout: 90000 });
 
-      // 결과 스크레이핑
-      const result = await page.evaluate(() => {
-        const recs = [...document.querySelectorAll("#output .rec")].map((rec) => {
-          const teams = [...rec.querySelectorAll(".team")].map((t) =>
-            [...t.querySelectorAll(".member")].map((m) =>
-              m.textContent.replace(/\s+/g, " ").trim()));
-          return {
-            hasOkFlag: !!rec.querySelector(".flag.ok"),
-            teams,
-            members: teams.flat(),
-          };
-        });
-        return { summary: document.getElementById("summary").innerText, recs };
-      });
+      const snap = () => page.evaluate(() => ({
+        summary: document.getElementById("summary").innerText,
+        okFlag: !!document.querySelector("#flags .flag.ok"),
+        chips: [...document.querySelectorAll("#comp-list .comp-chip")].map((c) =>
+          ({ text: c.innerText.replace(/\s+/g, " ").trim(), active: c.classList.contains("active") })),
+        teams: [...document.querySelectorAll("#board .teams-grid .team-col")].map((col) =>
+          [...col.querySelectorAll(".block")].map((b) => b.dataset.id)),
+        pool: [...document.querySelectorAll("#board > .team-col.pool .block")].map((b) => b.dataset.id),
+      }));
 
+      const result = await snap();
       check(result.summary.includes(`${c.n}명`), `요약에 ${c.n}명 표기`);
-      check(result.recs.length >= 1 && result.recs.length <= 3,
-        `추천안 ${result.recs.length}개 (1~3)`);
+      check(result.chips.length >= 1 && result.chips.length <= 3,
+        `조합 목록 ${result.chips.length}개 (1~3)`);
+      check(result.chips[0].active, "첫 조합이 활성으로 표시");
+      check(result.pool.length === 0, "미배정 0명 (전원 배치)");
 
-      const top = result.recs[0];
-      // 팀 크기 합 = N, 전원 유일 1회 배정
-      const allMembers = top.members;
-      const uniq = new Set(allMembers);
-      check(allMembers.length === c.n && uniq.size === c.n,
-        `최상위 추천안: 전원 ${c.n}명 정확히 1회 배정`);
-      // 팀 개수/크기 균형
-      const sizes = top.teams.map((t) => t.length);
+      // 화면엔 조합 하나만: 보드 팀 블럭 합이 정확히 N (3×N 아님)
+      const members = result.teams.flat();
+      check(members.length === c.n && new Set(members).size === c.n,
+        `단일 조합 표시: 보드에 전원 ${c.n}명 정확히 1회`);
+      const sizes = result.teams.map((t) => t.length);
       check(sizes.length === c.teams, `팀 개수 ${c.teams}개`);
       check(sizes.reduce((a, b) => a + b, 0) === c.n, "팀 크기 합 = 인원수");
       check(Math.max(...sizes) - Math.min(...sizes) <= 1, "팀 크기 균형(차이 ≤1)");
-      // 갈등 분리
-      check(top.hasOkFlag, "최상위 추천안: 같은 팀 내 갈등쌍 0개(✅)");
-      // 추천안 상이성
-      if (result.recs.length >= 2) {
-        const sig = (r) => r.teams.map((t) => [...t].sort().join(",")).sort().join("|");
-        check(sig(result.recs[0]) !== sig(result.recs[1]),
-          "추천안 1 ≠ 추천안 2 (서로 다른 구성)");
+      check(result.okFlag, "표시 조합: 같은 팀 내 갈등쌍 0개(✅)");
+
+      // 목록에서 다른 조합 선택 → 보드 교체 (조합이 2개 이상일 때)
+      if (result.chips.length >= 2) {
+        const sig0 = result.teams.map((t) => [...t].sort().join(",")).sort().join("|");
+        await page.click('#comp-list .comp-chip[data-idx="1"]');
+        const picked = await snap();
+        const sig1 = picked.teams.map((t) => [...t].sort().join(",")).sort().join("|");
+        check(picked.chips[1].active && sig1 !== sig0, "목록에서 2번 조합 선택 → 다른 구성 표시");
+        await page.click('#comp-list .comp-chip[data-idx="0"]'); // 1번으로 복귀
       }
 
-      // === 3) CSV 내보내기 (N=25에서) ===
+      // === 드래그&드롭 · 저장 · CSV (N=25) ===
       if (c.n === 25) {
-        const [download] = await Promise.all([
+        console.log("[드래그&드롭 편성 수정]");
+        const cur = await snap();
+        const srcId = cur.teams[0][0];
+        await page.locator(`#board .block[data-id="${srcId}"]`)
+          .dragTo(page.locator("#board .teams-grid .team-col").nth(1));
+        const moved = await page.evaluate((sid) => {
+          const teams = [...document.querySelectorAll("#board .teams-grid .team-col")].map((col) =>
+            [...col.querySelectorAll(".block")].map((b) => b.dataset.id));
+          return { inT1: teams[0].includes(sid), inT2: teams[1].includes(sid),
+            total: teams.flat().length,
+            dirty: document.getElementById("summary").innerText.includes("미저장") };
+        }, srcId);
+        check(!moved.inT1 && moved.inT2, `드래그: ${srcId} 팀1→팀2 이동`);
+        check(moved.total === c.n, "이동 후에도 전원 유지");
+        check(moved.dirty, "이동 후 '미저장 변경' 표시");
+
+        console.log("[현재 조합 저장]");
+        await page.click("#btn-save-comp");
+        const afterSave = await snap();
+        check(afterSave.chips.length === 4, `저장 후 목록 4개 (${afterSave.chips.length})`);
+        check(afterSave.chips.some((c2) => c2.text.includes("저장")), "저장 조합 칩 생성");
+
+        console.log("[CSV 내보내기]");
+        const [dl] = await Promise.all([
           page.waitForEvent("download", { timeout: 10000 }),
           page.click("#btn-export"),
         ]);
-        const dl = await download.path();
-        const csv = readFileSync(dl, "utf-8").replace(/^﻿/, "");
-        const lines = csv.trim().split("\n");
-        // 헤더 1 + 추천안 수 × N 행
-        const expected = 1 + result.recs.length * c.n;
-        check(lines.length === expected,
-          `CSV 내보내기 행 수 ${lines.length} = 1+${result.recs.length}×${c.n}`);
-        check(lines[0].startsWith("option,team,id,name"), "CSV 헤더 정상");
+        const lines = readFileSync(await dl.path(), "utf-8").replace(/^﻿/, "").trim().split("\n");
+        // 헤더 1 + 조합 4개 × N
+        check(lines.length === 1 + afterSave.chips.length * c.n,
+          `CSV 행 수 ${lines.length} = 1+${afterSave.chips.length}×${c.n}`);
+        check(lines[0].startsWith("composition,team,id,name"), "CSV 헤더 정상");
       }
 
-      // === 운영진 강제 규칙 (N=25에서) ===
+      // === 운영진 강제 규칙 (N=25) ===
       if (c.n === 25) {
         console.log("[운영진 강제 규칙: S02+S20 결합 / S05-S06 분리]");
         await page.fill("#ta-together", "S02,S20");
         await page.fill("#ta-apart", "S05,S06");
         await page.click("#btn-run");
-        await page.waitForSelector("#output .rec", { timeout: 90000 });
+        await page.waitForSelector("#board .teams-grid .team-col", { timeout: 90000 });
         await page.waitForFunction(
           () => document.getElementById("overlay").style.display === "none",
           null, { timeout: 90000 });
 
-        // 강제 규칙 충족 플래그
-        const okForced = await page.evaluate(() =>
-          document.querySelector("#output .rec").innerText.includes("강제 규칙 모두 충족"));
-        check(okForced, "최상위 추천안: 운영진 강제 규칙 모두 충족(✅)");
-
-        // CSV로 실제 배치 검증
-        const [dl2] = await Promise.all([
-          page.waitForEvent("download", { timeout: 10000 }),
-          page.click("#btn-export"),
-        ]);
-        const csv2 = readFileSync(await dl2.path(), "utf-8").replace(/^﻿/, "");
-        const team = {};
-        csv2.trim().split("\n").slice(1).forEach((ln) => {
-          const [opt, tm, id] = ln.split(",");
-          if (opt === "1") team[id] = tm;
+        const forced = await page.evaluate(() => {
+          const teams = [...document.querySelectorAll("#board .teams-grid .team-col")].map((col, ti) =>
+            [...col.querySelectorAll(".block")].map((b) => b.dataset.id));
+          const teamOf = {};
+          teams.forEach((ids, ti) => ids.forEach((id) => (teamOf[id] = ti)));
+          return { okForced: document.getElementById("flags").innerText.includes("강제 규칙 모두 충족"), teamOf };
         });
-        check(team.S02 === team.S20, `강제 결합: S02·S20 같은 팀(${team.S02})`);
-        check(team.S05 !== team.S06, `강제 분리: S05·S06 다른 팀(${team.S05}/${team.S06})`);
+        check(forced.okForced, "표시 조합: 운영진 강제 규칙 모두 충족(✅)");
+        check(forced.teamOf.S02 === forced.teamOf.S20, "강제 결합: S02·S20 같은 팀");
+        check(forced.teamOf.S05 !== forced.teamOf.S06, "강제 분리: S05·S06 다른 팀");
 
-        // 모순 제약 → 오류 표시 검증
+        // 모순 제약 → 오류 표시
         await page.fill("#ta-together", "S05,S06");
         await page.fill("#ta-apart", "S05,S06");
         await page.click("#btn-run");
         await page.waitForFunction(
-          () => /오류|모순/.test(document.getElementById("output").innerText),
+          () => /오류|모순/.test(document.getElementById("board").innerText),
           null, { timeout: 90000 });
         check(true, "모순 제약(결합+분리 동일 쌍) → 오류 메시지");
       }

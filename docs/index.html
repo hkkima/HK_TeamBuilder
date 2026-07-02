@@ -122,16 +122,37 @@
         <button id="btn-run" class="primary big">팀 추천 생성</button>
       </section>
 
-      <!-- 우측: 결과 -->
+      <!-- 우측: 편성 보드 -->
       <section class="panel results">
         <div class="results-head">
-          <h2>추천 결과</h2>
-          <button id="btn-export" class="ghost" disabled>CSV 내보내기</button>
+          <h2>팀 편성</h2>
+          <div class="results-actions">
+            <button id="btn-blank" class="ghost" disabled title="모든 인원을 미배정으로 두고 처음부터 조립">빈 편성 시작</button>
+            <button id="btn-save-comp" class="ghost" disabled>현재 조합 저장</button>
+            <button id="btn-export" class="ghost" disabled>CSV 내보내기</button>
+          </div>
         </div>
+
+        <!-- 조합 목록: 하나를 골라 보드에 표시 -->
+        <div class="comp-bar">
+          <span class="comp-bar-label">조합 목록</span>
+          <div id="comp-list" class="comp-list">
+            <span class="placeholder small">아직 없음 — 추천을 생성하거나 조합을 저장하세요</span>
+          </div>
+        </div>
+
         <div id="summary" class="summary"></div>
-        <div id="output" class="output">
+        <div id="score-parts" class="parts"></div>
+        <div id="flags"></div>
+
+        <!-- 드래그 편성 보드 -->
+        <div id="board" class="board">
           <p class="placeholder">데이터를 불러오고 <b>팀 추천 생성</b>을 누르세요.</p>
         </div>
+        <p id="board-hint" class="board-hint" style="display:none">
+          💡 블럭을 드래그해 팀 사이로 옮기세요. (또는 블럭 클릭 후 대상 팀 클릭)
+          변경하면 점수가 즉시 갱신됩니다. 마음에 들면 <b>현재 조합 저장</b>.
+        </p>
       </section>
     </main>
 
