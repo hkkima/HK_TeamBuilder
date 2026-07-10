@@ -18,6 +18,13 @@ def _f(row: dict, *keys: str) -> Optional[float]:
     return None
 
 
+_TRUTHY = {"y", "yes", "1", "true", "t", "o", "특별", "특수", "√", "v", "x"}
+
+
+def _truthy(v: str) -> bool:
+    return str(v).strip().lower() in _TRUTHY
+
+
 def _s(row: dict, *keys: str) -> str:
     for k in keys:
         if k in row and row[k] is not None and str(row[k]).strip() != "":
@@ -74,6 +81,7 @@ def load_students(path: str) -> list[Student]:
                 mbti=_s(row, "mbti", "MBTI").upper(),
                 issue_level=_f(row, "issue_level", "이슈강도", "이슈 강도") or 0.0,
                 issue_note=_s(row, "issue_note", "이슈비고", "이슈 비고", "비고"),
+                special=_truthy(_s(row, "special", "특수관리", "특수 관리", "특별관리", "특별", "tag")),
                 units=units,
             ))
     if not students:

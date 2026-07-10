@@ -107,6 +107,9 @@ async function run() {
     // 고이슈 격리
     const hiStack = await pg.evaluate(() => { const p = Store.project(), b = Store.byId(); return p.board.teams.filter((t) => t.filter((id) => TeamBuilder.highIssue(b.get(id))).length > 1).length; });
     check(hiStack === 0, "고이슈 팀당 최대 1명");
+    // 특수 관리 태그: 자동 편성 시 절대 2명 이상 같은 팀 금지
+    const spInfo = await pg.evaluate(() => { const p = Store.project(), b = Store.byId(); const tagged = p.students.filter((s) => s.special).length; const stack = p.board.teams.filter((t) => t.filter((id) => b.get(id).special).length > 1).length; return { tagged, stack }; });
+    check(spInfo.tagged >= 2 && spInfo.stack === 0, `특수관리 태그 ${spInfo.tagged}명 → 팀당 최대 1명(하드)`);
 
     // 4) 조합 목록 선택
     if (s.comps >= 2) {
@@ -143,6 +146,12 @@ async function run() {
     check(true, "수동 이동으로 고이슈 겹침 문제 표시");
     await pg.click(".prob button[data-fix]"); await pg.waitForTimeout(150);
     check(await pg.evaluate(() => { const p = Store.project(), b = Store.byId(); return p.board.teams.filter((t) => t.filter((id) => TeamBuilder.highIssue(b.get(id))).length > 1).length === 0; }), "자동 해결 후 고이슈 겹침 0");
+    // 특수관리 태그를 수동으로 겹치게 → 최우선 문제 + 자동 해결
+    await pg.evaluate(() => { const p = Store.project(), b = Store.byId(); const sp = p.students.filter((x) => x.special).map((x) => x.id); Store.moveStudent(sp[0], "team-" + Store.teamOf(sp[1])); });
+    await pg.waitForFunction(() => [...document.querySelectorAll(".prob")].some((x) => /특수관리/.test(x.textContent)), { timeout: 5000 });
+    check(true, "특수관리 수동 겹침 → 문제 표시");
+    await pg.click(".prob button[data-fix]"); await pg.waitForTimeout(150);
+    check(await pg.evaluate(() => { const p = Store.project(), b = Store.byId(); return p.board.teams.filter((t) => t.filter((id) => b.get(id).special).length > 1).length === 0; }), "자동 해결 후 특수관리 겹침 0");
 
     // 8) 팀장/메모 + 저장·재로드 유지
     console.log("\n[팀장/메모/저장]");

@@ -46,9 +46,10 @@
       <td><input class="cell mbti" data-id="${s.id}" data-col="mbti" value="${esc(s.mbti)}" maxlength="4" /></td>
       <td><input class="cell num" type="number" min="0" max="3" data-id="${s.id}" data-col="issue_level" value="${s.issue_level || 0}" /></td>
       <td><input class="cell note" data-id="${s.id}" data-col="issue_note" value="${esc(s.issue_note)}" /></td>
+      <td class="ctr"><input type="checkbox" class="sp-check" data-id="${s.id}" data-col="special"${s.special ? " checked" : ""} title="특수 관리(한 팀 2명 금지)" /></td>
       <td><button class="mini del" data-delstu="${s.id}" title="삭제">✕</button></td></tr>`).join("");
     return `<div class="table-scroll"><table class="grid"><thead><tr>
-      <th>이름</th><th>리더십</th><th>관리</th><th>기획</th><th>작업</th><th>소통</th><th>주성향</th><th>부성향</th><th>MBTI</th><th>이슈</th><th>비고</th><th></th>
+      <th>이름</th><th>리더십</th><th>관리</th><th>기획</th><th>작업</th><th>소통</th><th>주성향</th><th>부성향</th><th>MBTI</th><th>이슈</th><th>비고</th><th title="한 팀에 2명 이상 금지">특별</th><th></th>
       </tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
@@ -78,14 +79,14 @@
   }
 
   // ---- CSV ----
-  const STUDENTS_TEMPLATE = "id,name,leadership,management,planning,execution,communication,primary_disp,secondary_disp,mbti,issue_level,issue_note,단원1,단원2,단원3\nS01,김규장,1,2,4,4,2,작업자,연구자,INTP,1,불안형,3,4,3\nS02,김민성,2,3,2,4,3,매니저,연구자,ESTJ,,,4,4,5\n";
+  const STUDENTS_TEMPLATE = "id,name,leadership,management,planning,execution,communication,primary_disp,secondary_disp,mbti,issue_level,issue_note,special,단원1,단원2,단원3\nS01,김규장,1,2,4,4,2,작업자,연구자,INTP,1,불안형,Y,3,4,3\nS02,김민성,2,3,2,4,3,매니저,연구자,ESTJ,,,,4,4,5\n";
   const RELATIONS_TEMPLATE = "DATE,FROM,TO,TYPE,W,NOTE\n2026-06-10,김규장,이제희,NEG,3,소통이 전혀 되지 않음\n2026-07-09,윤희성,박송호,POS,3,함께하고 싶은 팀원\n";
 
   function exportStudents(p) {
     const unitCols = Array.from(new Set(p.students.flatMap((s) => Object.keys(s.units || {}))));
-    const head = ["id", "name", ...COLS.map((c) => c[0]), "primary_disp", "secondary_disp", "mbti", "issue_level", "issue_note", ...unitCols];
+    const head = ["id", "name", ...COLS.map((c) => c[0]), "primary_disp", "secondary_disp", "mbti", "issue_level", "issue_note", "special", ...unitCols];
     const lines = [head.join(",")].concat(p.students.map((s) => head.map((h) => {
-      let v = h in (s.units || {}) ? s.units[h] : s[h]; v = v == null ? "" : v;
+      let v = h === "special" ? (s.special ? "Y" : "") : (h in (s.units || {}) ? s.units[h] : s[h]); v = v == null ? "" : v;
       const t = String(v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
     }).join(",")));
     global.UI.download("students.csv", "﻿" + lines.join("\n"), "text/csv");
@@ -131,7 +132,7 @@
     const act = b.dataset.act;
     if (act === "sample") { const students = TB.loadStudents(global.SAMPLE_STUDENTS); const rels = TB.loadRelations(global.SAMPLE_RELATIONS, students); Store.loadData(students, rels); global.UI.toast("샘플 불러옴"); return; }
     if (act === "import") return root.querySelector("#dfile").click();
-    if (act === "add-student") { const s = { id: newId(p.students), name: "새 수강생", leadership: null, management: null, planning: null, execution: null, communication: null, primary_disp: null, secondary_disp: null, mbti: "", issue_level: 0, issue_note: "", units: {} }; return Store.addStudent(s); }
+    if (act === "add-student") { const s = { id: newId(p.students), name: "새 수강생", leadership: null, management: null, planning: null, execution: null, communication: null, primary_disp: null, secondary_disp: null, mbti: "", issue_level: 0, issue_note: "", special: false, units: {} }; return Store.addStudent(s); }
     if (act === "add-rel") { if (!p.students.length) return global.UI.toast("먼저 수강생을 추가하세요", "bad"); return Store.addRelation({ src: p.students[0].id, dst: p.students[Math.min(1, p.students.length - 1)].id, positive: false, weight: 1, note: "" }); }
     if (act === "add-together" || act === "add-apart") { const k = act === "add-together" ? "together" : "apart"; if (p.students.length < 2) return global.UI.toast("수강생 2명 이상 필요", "bad"); const c = Object.assign({}, p.constraints); c[k] = c[k].concat([[p.students[0].id, p.students[1].id]]); return Store.setConstraints(c); }
     if (act === "tmpl-s") return global.UI.download("students_template.csv", "﻿" + STUDENTS_TEMPLATE, "text/csv");
@@ -143,7 +144,8 @@
     const t = e.target, p = Store.project();
     if (t.dataset.id && t.dataset.col) {
       let v = t.value;
-      if (t.type === "number") { v = v === "" ? (t.dataset.col === "issue_level" ? 0 : null) : Number(v); }
+      if (t.type === "checkbox") v = t.checked;
+      else if (t.type === "number") { v = v === "" ? (t.dataset.col === "issue_level" ? 0 : null) : Number(v); }
       const patch = {}; patch[t.dataset.col] = v; return Store.updateStudent(t.dataset.id, patch);
     }
     if (t.dataset.rel != null) {

@@ -23,6 +23,7 @@ from .relationship import RelationshipGraph, _key
 class Weights:
     conflict: float = 100.0
     positive: float = 8.0
+    special_stack: float = 500.0     # 특수 관리 태그 2명↑ 같은 팀 (사실상 하드)
     issue_stack: float = 40.0        # 같은 팀 고이슈 2명↑ 1명당 페널티
     issue_balance: float = 10.0      # 팀 간 이슈 총량 표준편차 스케일
     disp_diversity: float = 16.0     # 성향 다양성(0~1)
@@ -48,6 +49,7 @@ class ScoreBreakdown:
     broken_together: list[tuple[str, str]] = field(default_factory=list)
     violated_separate: list[tuple[str, str]] = field(default_factory=list)
     issue_stacks: int = 0
+    special_stacks: int = 0
 
 
 def _mbti_balance(teams: list[list[Student]]) -> float:
@@ -127,6 +129,16 @@ def _issue_stacks(teams: list[list[Student]]) -> int:
     return extra
 
 
+def _special_stacks(teams: list[list[Student]]) -> int:
+    """특수 관리 태그가 같은 팀에 2명 이상일 때 초과분 합계."""
+    extra = 0
+    for team in teams:
+        sp = sum(1 for m in team if m.special)
+        if sp > 1:
+            extra += sp - 1
+    return extra
+
+
 def score_partition(
     teams: list[list[Student]],
     graph: RelationshipGraph,
@@ -164,10 +176,12 @@ def score_partition(
 
     broken_together = [k for k in force_together if k not in same_team]
     stacks = _issue_stacks(teams)
+    sp_stacks = _special_stacks(teams)
 
     parts = {
         "conflict": -conflict_penalty,
         "positive": +positive_bonus,
+        "special_stack": -weights.special_stack * sp_stacks,
         "issue_stack": -weights.issue_stack * stacks,
         "issue_balance": -weights.issue_balance * _issue_balance(teams),
         "disp_diversity": +weights.disp_diversity * _disp_diversity(teams),
@@ -183,5 +197,5 @@ def score_partition(
         total=sum(parts.values()), parts=parts,
         intra_conflicts=intra_conflicts, kept_positives=kept_positives,
         broken_together=broken_together, violated_separate=violated_separate,
-        issue_stacks=stacks,
+        issue_stacks=stacks, special_stacks=sp_stacks,
     )

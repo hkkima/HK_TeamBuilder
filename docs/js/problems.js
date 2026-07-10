@@ -15,6 +15,12 @@
     // 미배정
     if (board.pool.length) probs.push({ type: "unassigned", teams: [], ids: board.pool.slice(),
       label: `미배정 ${board.pool.length}명`, sev: 3, fixable: false });
+    // 특수 관리 태그 겹침 (최우선 — 하드 규칙)
+    board.teams.forEach((t, ti) => {
+      const sp = t.filter((id) => byId.get(id) && byId.get(id).special);
+      if (sp.length > 1) probs.push({ type: "special", teams: [ti], ids: sp,
+        label: `팀 ${ti + 1} 특수관리 ${sp.length}명 겹침(금지)`, sev: 4, fixable: true });
+    });
     // 갈등쌍
     sb.intra.forEach((k) => {
       const [a, b] = k.split("|");
@@ -83,6 +89,7 @@
     const ts = teams.map((t) => t.map((id) => byId.get(id)).filter(Boolean));
     const sb = TB.scorePartition(ts, graph, weights);
     if (type === "conflict") return sb.intra.length;
+    if (type === "special") return sb.specialStacks;
     if (type === "stack") return sb.issueStacks;
     if (type === "leader") return teams.filter((t) => t.length && !t.some((id) => byId.get(id) && TB.leaderCandidate(byId.get(id)))).length;
     return 0;

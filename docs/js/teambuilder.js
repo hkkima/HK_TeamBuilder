@@ -47,6 +47,8 @@
     }
     return out;
   }
+  const TRUTHY = new Set(["y", "yes", "1", "true", "t", "o", "특별", "특수", "√", "v", "x"]);
+  const truthy = (v) => TRUTHY.has(String(v).trim().toLowerCase());
   const pick = (row, keys) => { for (const k of keys) if (row[k] !== undefined && String(row[k]).trim() !== "") return String(row[k]).trim(); return ""; };
   const pickNum = (row, keys) => { const v = pick(row, keys); if (v === "") return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
 
@@ -76,6 +78,7 @@
         mbti: pick(row, ["mbti", "MBTI"]).toUpperCase(),
         issue_level: pickNum(row, ["issue_level", "이슈강도", "이슈 강도"]) || 0,
         issue_note: pick(row, ["issue_note", "이슈비고", "이슈 비고", "비고"]),
+        special: truthy(pick(row, ["special", "특수관리", "특수 관리", "특별관리", "특별", "tag"])),
         units,
       });
     });
@@ -156,7 +159,7 @@
 
   // ---- 점수화 ----
   const DEFAULT_WEIGHTS = {
-    conflict: 100, positive: 8, issue_stack: 40, issue_balance: 10,
+    conflict: 100, positive: 8, special_stack: 500, issue_stack: 40, issue_balance: 10,
     disp_diversity: 16, leader: 14, mbti_balance: 8,
     competency_coverage: 8, competency_balance: 6,
     conflict_intensity: 1.0, positive_intensity: 0.5, competency_metric: "stdev",
@@ -204,6 +207,7 @@
   }
   function issueBalance(teams) { const tot = teams.map((t) => t.reduce((s, m) => s + (m.issue_level || 0), 0)); return tot.length >= 2 ? pstdev(tot) : 0; }
   function issueStacks(teams) { let e = 0; for (const t of teams) { const hi = t.filter(highIssue).length; if (hi > 1) e += hi - 1; } return e; }
+  function specialStacks(teams) { let e = 0; for (const t of teams) { const sp = t.filter((m) => m.special).length; if (sp > 1) e += sp - 1; } return e; }
 
   function scorePartition(teams, graph, w, forceTogether, forceSeparate) {
     forceTogether = forceTogether || new Set();
@@ -222,8 +226,10 @@
     const brokenTogether = [];
     forceTogether.forEach((k) => { if (!sameTeam.has(k)) brokenTogether.push(k); });
     const stacks = issueStacks(teams);
+    const spStacks = specialStacks(teams);
     const parts = {
       conflict: -conflictPenalty, positive: +positiveBonus,
+      special_stack: -w.special_stack * spStacks,
       issue_stack: -w.issue_stack * stacks,
       issue_balance: -w.issue_balance * issueBalance(teams),
       disp_diversity: +w.disp_diversity * dispDiversity(teams),
@@ -235,7 +241,7 @@
       force_separate: -w.force_separate * violatedSeparate.length,
     };
     let total = 0; for (const k in parts) total += parts[k];
-    return { total, parts, intra, kept, brokenTogether, violatedSeparate, issueStacks: stacks };
+    return { total, parts, intra, kept, brokenTogether, violatedSeparate, issueStacks: stacks, specialStacks: spStacks };
   }
 
   // ---- 시드 RNG ----
@@ -284,32 +290,45 @@
     });
     for (let t = 0; t < nTeams; t++) if (perTeam[t] > sizes[t]) throw new Error(`팀 ${t + 1}에 핀 ${perTeam[t]}명 > 정원 ${sizes[t]}`);
     forceSeparate.forEach((k) => { const [a, b] = k.split("|"); if (pins[a] != null && pins[b] != null && pins[a] === pins[b]) throw new Error(`${a}, ${b}는 분리 대상인데 같은 팀에 핀됨(모순).`); });
+    // 특수 관리 태그 검증
+    const spIdx = students.map((s, i) => s.special ? i : -1).filter((i) => i >= 0);
+    if (spIdx.length > nTeams) throw new Error(`특수 관리 태그 ${spIdx.length}명 > 팀 ${nTeams}개 — 팀 수를 늘리세요.`);
+    const grpSp = new Map();
+    spIdx.forEach((i) => { const gi = mg.get(i); if (grpSp.has(gi)) throw new Error(`특수 관리 태그 2명이 강제 결합으로 묶여 분리 불가(모순): ${ids[grpSp.get(gi)]}, ${ids[i]}`); grpSp.set(gi, i); });
+    const pinSp = new Map();
+    spIdx.forEach((i) => { const t = pins[ids[i]]; if (t != null) { if (pinSp.has(t)) throw new Error(`특수 관리 태그 2명이 같은 팀에 핀됨(모순): ${ids[pinSp.get(t)]}, ${ids[i]}`); pinSp.set(t, i); } });
     return groups;
   }
-  function seedAssignment(students, sizes, groups, forceSeparate, rng, pins) {
-    pins = pins || {};
+  function seedAssignment(students, sizes, groups, forceSeparate, rng, pins, specialIdx) {
+    pins = pins || {}; specialIdx = specialIdx || new Set();
     const ids = students.map((s) => s.id), nTeams = sizes.length, remaining = sizes.slice();
     const assign = new Array(students.length).fill(-1), inTeam = Array.from({ length: nTeams }, () => new Set()), sep = new Map();
+    const teamHasSp = new Array(nTeams).fill(false);
     forceSeparate.forEach((k) => { const [a, b] = k.split("|"); if (!sep.has(a)) sep.set(a, new Set()); if (!sep.has(b)) sep.set(b, new Set()); sep.get(a).add(b); sep.get(b).add(a); });
+    const grpSp = groups.map((grp) => grp.some((i) => specialIdx.has(i)));
     const groupPin = new Map();
     groups.forEach((grp, gi) => { for (const i of grp) if (pins[ids[i]] != null) { groupPin.set(gi, pins[ids[i]]); break; } });
-    const place = (gi, t) => { const grp = groups[gi]; if (remaining[t] < grp.length) return false; grp.forEach((i) => { assign[i] = t; inTeam[t].add(ids[i]); }); remaining[t] -= grp.length; return true; };
+    const place = (gi, t) => { const grp = groups[gi]; if (remaining[t] < grp.length) return false; if (grpSp[gi] && teamHasSp[t]) return false; grp.forEach((i) => { assign[i] = t; inTeam[t].add(ids[i]); }); remaining[t] -= grp.length; if (grpSp[gi]) teamHasSp[t] = true; return true; };
+    const cost = (gids, t) => { let c = 0; gids.forEach((g) => (sep.get(g) || new Set()).forEach((p) => { if (inTeam[t].has(p)) c++; })); return c; };
+    const placeFree = (gi) => {
+      const grp = groups[gi], gids = grp.map((i) => ids[i]);
+      let cand = []; for (let t = 0; t < nTeams; t++) if (remaining[t] >= grp.length && !(grpSp[gi] && teamHasSp[t])) cand.push(t);
+      if (!cand.length) return false;
+      shuffle(cand, rng); cand.sort((a, b) => cost(gids, a) - cost(gids, b));
+      return place(gi, cand[0]);
+    };
     for (const [gi, t] of groupPin) if (!place(gi, t)) return null;
-    const order = groups.map((_, gi) => gi).filter((gi) => !groupPin.has(gi)).sort((x, y) => (groups[y].length - groups[x].length) || (rng() - 0.5));
-    for (const gi of order) {
-      const grp = groups[gi], size = grp.length, gids = grp.map((i) => ids[i]);
-      let cand = []; for (let t = 0; t < nTeams; t++) if (remaining[t] >= size) cand.push(t);
-      if (!cand.length) return null;
-      const cost = (t) => { let c = 0; gids.forEach((g) => (sep.get(g) || new Set()).forEach((p) => { if (inTeam[t].has(p)) c++; })); return c; };
-      shuffle(cand, rng); cand.sort((a, b) => cost(a) - cost(b));
-      const t = cand[0]; grp.forEach((i) => { assign[i] = t; inTeam[t].add(ids[i]); }); remaining[t] -= size;
-    }
+    const spOrder = groups.map((_, gi) => gi).filter((gi) => grpSp[gi] && !groupPin.has(gi)).sort((x, y) => (groups[y].length - groups[x].length) || (rng() - 0.5));
+    for (const gi of spOrder) if (!placeFree(gi)) return null;
+    const rest = groups.map((_, gi) => gi).filter((gi) => !grpSp[gi] && !groupPin.has(gi)).sort((x, y) => (groups[y].length - groups[x].length) || (rng() - 0.5));
+    for (const gi of rest) if (!placeFree(gi)) return null;
     return assign;
   }
-  function localSearch(students, assign, sizes, graph, w, rng, maxIter, fT, fS, pinned) {
-    pinned = pinned || new Set();
+  function localSearch(students, assign, sizes, graph, w, rng, maxIter, fT, fS, pinned, specialIdx) {
+    pinned = pinned || new Set(); specialIdx = specialIdx || new Set();
     const nTeams = sizes.length, n = students.length;
     const score = (a) => scorePartition(partitionFrom(students, a, nTeams), graph, w, fT, fS);
+    const spViolation = (a) => { const cnt = new Array(nTeams).fill(0); for (const i of specialIdx) { if (++cnt[a[i]] > 1) return true; } return false; };
     let best = score(assign);
     for (let it = 0; it < maxIter; it++) {
       let improved = false; const order = shuffle(Array.from({ length: n }, (_, i) => i), rng);
@@ -318,6 +337,7 @@
         for (let jj = ii + 1; jj < n; jj++) {
           const j = order[jj]; if (pinned.has(j) || assign[i] === assign[j]) continue;
           [assign[i], assign[j]] = [assign[j], assign[i]];
+          if (specialIdx.size && (specialIdx.has(i) || specialIdx.has(j)) && spViolation(assign)) { [assign[i], assign[j]] = [assign[j], assign[i]]; continue; }
           const cand = score(assign);
           if (cand.total > best.total + 1e-9) { best = cand; improved = true; break; }
           [assign[i], assign[j]] = [assign[j], assign[i]];
@@ -339,11 +359,12 @@
     const groups = validateConstraints(students, sizes, fT, fS, pins);
     const idxMap = new Map(students.map((s, i) => [s.id, i]));
     const pinnedIdx = new Set(Object.keys(pins).map((pid) => idxMap.get(pid)));
+    const specialIdx = new Set(students.map((s, i) => s.special ? i : -1).filter((i) => i >= 0));
     const found = new Map();
     for (let r = 0; r < restarts; r++) {
-      const assign = seedAssignment(students, sizes, groups, fS, rng, pins);
-      if (assign === null) throw new Error("강제 제약/핀을 만족하는 초기 배치를 찾지 못했습니다.");
-      const sb = localSearch(students, assign, sizes, graph, w, rng, maxIter, fT, fS, pinnedIdx);
+      const assign = seedAssignment(students, sizes, groups, fS, rng, pins, specialIdx);
+      if (assign === null) throw new Error("강제 제약/핀/특수 태그를 만족하는 초기 배치를 찾지 못했습니다.");
+      const sb = localSearch(students, assign, sizes, graph, w, rng, maxIter, fT, fS, pinnedIdx, specialIdx);
       const partition = partitionFrom(students, assign, nTeams), sig = signature(partition);
       if (!found.has(sig) || sb.total > found.get(sig).score.total) found.set(sig, { teams: partition, score: sb, signature: sig });
     }

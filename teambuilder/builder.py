@@ -137,6 +137,31 @@ def validate_constraints(
     for a, b in force_separate:
         if a in pins and b in pins and pins[a] == pins[b]:
             raise ValueError(f"{a}, {b}는 분리 대상인데 같은 팀에 핀됨(모순).")
+
+    # ---- 특수 관리 태그 검증 (한 팀에 2명 이상 금지, 하드) ----
+    special_idx = [i for i, s in enumerate(students) if s.special]
+    if len(special_idx) > n_teams:
+        raise ValueError(
+            f"특수 관리 태그 {len(special_idx)}명 > 팀 {n_teams}개 — "
+            f"태그가 팀 수보다 많아 분리할 수 없습니다. 팀 수를 늘리세요.")
+    grp_special: dict[int, int] = {}
+    for i in special_idx:
+        gi = member_group[i]
+        if gi in grp_special:
+            raise ValueError(
+                f"특수 관리 태그 2명이 강제 결합으로 묶여 분리 불가(모순): "
+                f"{ids[grp_special[gi]]}, {ids[i]}")
+        grp_special[gi] = i
+    pin_special_team: dict[int, int] = {}
+    for i in special_idx:
+        pid = ids[i]
+        if pid in pins:
+            t = pins[pid]
+            if t in pin_special_team:
+                raise ValueError(
+                    f"특수 관리 태그 2명이 같은 팀에 핀됨(모순): "
+                    f"{ids[pin_special_team[t]]}, {pid}")
+            pin_special_team[t] = i
     return groups
 
 
@@ -147,24 +172,27 @@ def _seed_assignment(
     force_separate: set[tuple[str, str]],
     rng: random.Random,
     pins: Optional[dict[str, int]] = None,
+    special_idx: Optional[set[int]] = None,
 ) -> Optional[list[int]]:
     """제약을 존중하는 초기 배정.
 
-    핀된 학생이 속한 그룹은 지정 팀에 먼저 배치, 나머지는 큰 그룹부터
-    용량이 남는 팀에(분리 위반이 적은 팀 우선). 배치 불가하면 None.
+    핀 그룹 → 특수 태그 그룹(팀당 1명) → 나머지 순으로 배치. 배치 불가하면 None.
     """
     pins = pins or {}
+    special_idx = special_idx or set()
     ids = [s.id for s in students]
     n_teams = len(sizes)
     remaining = list(sizes)
     assign = [-1] * len(students)
     members_in_team: list[set[str]] = [set() for _ in range(n_teams)]
+    team_has_special = [False] * n_teams
     sep_partners: dict[str, set[str]] = {}
     for a, b in force_separate:
         sep_partners.setdefault(a, set()).add(b)
         sep_partners.setdefault(b, set()).add(a)
 
-    # 그룹별 고정 팀(핀에서 유도)
+    group_special = [any(i in special_idx for i in grp) for grp in groups]
+
     group_pin: dict[int, int] = {}
     for gi, grp in enumerate(groups):
         for i in grp:
@@ -176,43 +204,48 @@ def _seed_assignment(
         grp = groups[gi]
         if remaining[t] < len(grp):
             return False
+        if group_special[gi] and team_has_special[t]:
+            return False
         for i in grp:
             assign[i] = t
             members_in_team[t].add(ids[i])
         remaining[t] -= len(grp)
+        if group_special[gi]:
+            team_has_special[t] = True
         return True
 
-    # 1) 핀 고정 그룹 먼저 배치
+    def sep_cost_of(gids, t: int) -> int:
+        return sum(1 for gid in gids for p in sep_partners.get(gid, ()) if p in members_in_team[t])
+
+    def place_free(gi: int) -> bool:
+        grp = groups[gi]
+        gids = [ids[i] for i in grp]
+        cand = [t for t in range(n_teams) if remaining[t] >= len(grp)
+                and not (group_special[gi] and team_has_special[t])]
+        if not cand:
+            return False
+        rng.shuffle(cand)
+        cand.sort(key=lambda t: sep_cost_of(gids, t))
+        return place(gi, cand[0])
+
+    # 1) 핀 고정 그룹
     for gi, t in group_pin.items():
         if not place(gi, t):
             return None
-
-    # 2) 나머지: 큰 그룹부터, 동률은 무작위로
-    order = sorted((gi for gi in range(len(groups)) if gi not in group_pin),
-                   key=lambda gi: (-len(groups[gi]), rng.random()))
-    for gi in order:
-        grp = groups[gi]
-        size = len(grp)
-        gids = [ids[i] for i in grp]
-        # 용량이 되는 팀 후보
-        cand = [t for t in range(n_teams) if remaining[t] >= size]
-        if not cand:
+    # 2) 특수 태그 그룹 (팀당 1명 하드), 큰 것부터
+    special_order = sorted((gi for gi in range(len(groups))
+                            if group_special[gi] and gi not in group_pin),
+                           key=lambda gi: (-len(groups[gi]), rng.random()))
+    for gi in special_order:
+        if not place_free(gi):
             return None
-        # 분리 위반 수가 적은 팀 우선, 동률은 무작위
-        def sep_cost(t: int) -> int:
-            cnt = 0
-            for gid in gids:
-                for p in sep_partners.get(gid, ()):  # noqa: B023
-                    if p in members_in_team[t]:
-                        cnt += 1
-            return cnt
-        rng.shuffle(cand)
-        cand.sort(key=sep_cost)
-        t = cand[0]
-        for i in grp:
-            assign[i] = t
-            members_in_team[t].add(ids[i])
-        remaining[t] -= size
+    # 3) 나머지
+    rest = sorted((gi for gi in range(len(groups))
+                   if not group_special[gi] and gi not in group_pin),
+                  key=lambda gi: (-len(groups[gi]), rng.random()))
+    for gi in rest:
+        if not place_free(gi):
+            return None
     return assign
 
 
@@ -240,13 +273,25 @@ def _local_search(
     force_together: set[tuple[str, str]],
     force_separate: set[tuple[str, str]],
     pinned: Optional[set[int]] = None,
+    special_idx: Optional[set[int]] = None,
 ) -> tuple[list[int], ScoreBreakdown]:
     """두 학생의 팀을 맞교환하며 점수를 개선하는 first-improvement 지역탐색.
 
     pinned: 고정된 학생 인덱스 집합(스왑에서 제외).
+    special_idx: 특수 태그 인덱스 — 스왑 후 한 팀에 2명이 되면 거부(하드).
     """
     pinned = pinned or set()
+    special_idx = special_idx or set()
     n_teams = len(sizes)
+
+    def special_violation(a) -> bool:
+        # 각 팀의 특수 태그 수가 2 이상이면 위반
+        cnt = [0] * n_teams
+        for i in special_idx:
+            cnt[a[i]] += 1
+            if cnt[a[i]] > 1:
+                return True
+        return False
 
     def score(a):
         return score_partition(
@@ -269,6 +314,10 @@ def _local_search(
                 if j in pinned or assign[i] == assign[j]:
                     continue
                 assign[i], assign[j] = assign[j], assign[i]
+                if special_idx and (i in special_idx or j in special_idx) \
+                        and special_violation(assign):
+                    assign[i], assign[j] = assign[j], assign[i]  # 특수 태그 위반 → 거부
+                    continue
                 cand = score(assign)
                 if cand.total > best.total + 1e-9:
                     best = cand
@@ -313,17 +362,18 @@ def build_recommendations(
                                   force_together, force_separate, pins)
     idx = {s.id: i for i, s in enumerate(students)}
     pinned_idx = {idx[pid] for pid in pins}
+    special_idx = {i for i, s in enumerate(students) if s.special}
 
     found: dict[tuple, Recommendation] = {}
     for _ in range(restarts):
         assign = _seed_assignment(students, size_list, groups,
-                                  force_separate, rng, pins)
+                                  force_separate, rng, pins, special_idx)
         if assign is None:
-            raise ValueError("강제 제약/핀을 만족하는 초기 배치를 찾지 못했습니다. "
+            raise ValueError("강제 제약/핀/특수 태그를 만족하는 초기 배치를 찾지 못했습니다. "
                              "팀 크기나 제약을 조정하세요.")
         assign, sb = _local_search(
             students, assign, size_list, graph, weights, rng, max_iter,
-            force_together, force_separate, pinned_idx)
+            force_together, force_separate, pinned_idx, special_idx)
         partition = _partition_from_assignment(students, assign, n_teams)
         sig = _signature(partition)
         team_objs = [Team(index=i, members=partition[i]) for i in range(n_teams)]

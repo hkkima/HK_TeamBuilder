@@ -44,6 +44,7 @@ def generate(n, seed=7):
             "mbti": rng.choice(MBTIS),
             "issue_level": 0,
             "issue_note": "",
+            "special": "",
             "단원1": rng.randint(1, 5),
             "단원2": rng.randint(1, 5),
             "단원3": rng.randint(1, 5),
@@ -55,6 +56,12 @@ def generate(n, seed=7):
     for i in hi_idx:
         students[i]["issue_level"] = rng.choice([2, 3])
         students[i]["issue_note"] = rng.choice(ISSUE_NOTES)
+
+    # 특수 관리 태그 주입 (팀 수보다 적게 → 분리 가능). 대략 n//12명.
+    n_special = max(2, n // 12)
+    sp_idx = rng.sample(range(n), min(n_special, n))
+    for i in sp_idx:
+        students[i]["special"] = "Y"
 
     names = [s["name"] for s in students]
 
@@ -105,6 +112,7 @@ def generate(n, seed=7):
         "conflict_pairs": [f"{names[a]}|{names[b]}" for a, b in conflict_pairs],
         "positive_pairs": [f"{names[a]}|{names[b]}" for a, b in positive_pairs],
         "high_issue": [names[i] for i in hi_idx],
+        "special": [names[i] for i in sp_idx],
     }
     return students, relations, meta
 
@@ -113,7 +121,7 @@ def write(out_dir, students, relations, meta):
     os.makedirs(out_dir, exist_ok=True)
     scols = ["id", "name", "leadership", "management", "planning",
              "execution", "communication", "primary_disp", "secondary_disp",
-             "mbti", "issue_level", "issue_note", "단원1", "단원2", "단원3"]
+             "mbti", "issue_level", "issue_note", "special", "단원1", "단원2", "단원3"]
     with open(os.path.join(out_dir, "students.csv"), "w", newline="",
               encoding="utf-8-sig") as fh:
         w = csv.DictWriter(fh, fieldnames=scols)

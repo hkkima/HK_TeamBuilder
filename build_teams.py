@@ -37,7 +37,7 @@ def parse_args(argv):
     p.add_argument("--out-csv", default="output/recommendations.csv")
 
     # 가중치
-    for name in ("conflict", "positive", "issue-stack", "issue-balance",
+    for name in ("conflict", "positive", "special-stack", "issue-stack", "issue-balance",
                  "disp-diversity", "leader", "mbti-balance",
                  "competency-coverage", "competency-balance",
                  "force-together", "force-separate"):
@@ -53,6 +53,7 @@ def build_weights(a) -> Weights:
     w = Weights()
     mapping = {
         "w_conflict": "conflict", "w_positive": "positive",
+        "w_special_stack": "special_stack",
         "w_issue_stack": "issue_stack", "w_issue_balance": "issue_balance",
         "w_disp_diversity": "disp_diversity", "w_leader": "leader",
         "w_mbti_balance": "mbti_balance",

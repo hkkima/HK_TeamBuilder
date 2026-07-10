@@ -68,6 +68,7 @@ class Student:
     mbti: str = ""
     issue_level: float = 0.0                # 이슈 강도 (0~3, 0=없음)
     issue_note: str = ""                    # 이슈 비고
+    special: bool = False                   # 특수 관리 태그 — 한 팀에 2명 이상 금지(하드)
     units: dict[str, float] = field(default_factory=dict)  # 단원별 점수
 
     def mbti_letter(self, axis_index: int) -> Optional[str]:

@@ -85,6 +85,26 @@ def test_name_resolution():
     print("ok: 관계 이름 참조 해석")
 
 
+def test_special_tag():
+    students, graph, meta = _load()
+    assert len(meta["special"]) >= 2, "샘플에 특수 태그가 있어야 함"
+    # 특수 태그 학생은 어떤 팀에도 2명 이상 없어야 함 (모든 추천안)
+    recs = build_recommendations(students, graph, teams=4, n_options=3, restarts=40)
+    for rec in recs:
+        for t in rec.teams:
+            assert sum(1 for m in t.members if m.special) <= 1, "특수 태그 겹침!"
+        assert rec.score.special_stacks == 0
+    # 태그가 팀 수보다 많으면 예외
+    for s in students:
+        s.special = True
+    try:
+        build_recommendations(students, graph, teams=4, restarts=3)
+        assert False, "태그>팀수는 예외여야 함"
+    except ValueError:
+        pass
+    print("ok: 특수 태그 팀당 최대 1명 + 초과 예외")
+
+
 def test_pins():
     students, graph, _ = _load()
     ids = [s.id for s in students]
@@ -124,6 +144,7 @@ if __name__ == "__main__":
     test_issue_and_leader()
     test_forced_constraints()
     test_name_resolution()
+    test_special_tag()
     test_pins()
     test_options_distinct()
     print("\n전체 통과 ✅")
