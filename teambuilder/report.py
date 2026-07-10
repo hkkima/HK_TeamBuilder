@@ -1,22 +1,24 @@
-"""추천안을 사람이 읽기 좋은 리포트(Markdown)와 CSV로 출력."""
+"""추천안 Markdown/CSV 리포트 (v2)."""
 
 from __future__ import annotations
 
 import csv
 
 from .builder import Recommendation
-from .models import MBTI_AXES, STANDARD_ROLES, Team
+from .models import DISPOSITIONS, MBTI_AXES, Team
 from .relationship import RelationshipGraph
 
 PART_LABELS = {
     "force_together": "강제 결합",
     "force_separate": "강제 분리",
     "conflict": "갈등 분리",
-    "positive": "긍정 관계 유지",
-    "prev_mix": "이전 팀 섞기",
-    "mbti_balance": "성향(MBTI) 균형",
-    "role_coverage": "역할 배분",
-    "leader_balance": "리더 분포",
+    "positive": "긍정 유지",
+    "issue_stack": "고이슈 격리",
+    "issue_balance": "이슈 분산",
+    "disp_diversity": "성향 다양성",
+    "leader": "리더 확보",
+    "mbti_balance": "MBTI 균형",
+    "competency_coverage": "역량 커버리지",
     "competency_balance": "역량 평준화(보조)",
 }
 
@@ -24,7 +26,7 @@ PART_LABELS = {
 def _mbti_dist(team: Team) -> str:
     known = [m for m in team.members if len(m.mbti) >= 4]
     if not known:
-        return "MBTI 데이터 없음"
+        return "MBTI 없음"
     out = []
     for ai, (p, q) in enumerate(MBTI_AXES):
         cp = sum(1 for m in known if m.mbti_letter(ai) == p)
@@ -32,34 +34,30 @@ def _mbti_dist(team: Team) -> str:
     return " · ".join(out)
 
 
-def _roles_in(team: Team) -> str:
-    roles: dict[str, list[str]] = {r: [] for r in STANDARD_ROLES}
+def _disps_in(team: Team) -> str:
+    counts = {d: 0 for d in DISPOSITIONS}
     for m in team.members:
-        if m.primary_role in roles:
-            roles[m.primary_role].append(m.name)
-        elif m.secondary_role in roles:
-            roles[m.secondary_role].append(f"{m.name}(부)")
-    shown = [f"{r}: {', '.join(v)}" for r, v in roles.items() if v]
-    return " | ".join(shown) if shown else "역할 데이터 없음"
+        if m.primary_disp in counts:
+            counts[m.primary_disp] += 1
+    shown = [f"{d}{c}" for d, c in counts.items() if c]
+    return " ".join(shown) if shown else "성향 데이터 없음"
 
 
-def render_recommendation(
-    idx: int, rec: Recommendation, graph: RelationshipGraph
-) -> str:
-    lines: list[str] = []
-    lines.append(f"## 추천안 {idx}  (종합점수 {rec.score.total:.1f})")
-    lines.append("")
-    # 점수 분해
+def _leaders_in(team: Team) -> str:
+    ls = [m.name for m in team.members if m.is_leader_candidate()]
+    return ", ".join(ls) if ls else "없음"
+
+
+def render_recommendation(idx: int, rec: Recommendation, graph: RelationshipGraph) -> str:
+    lines: list[str] = [f"## 추천안 {idx}  (종합점수 {rec.score.total:.1f})", ""]
     lines.append("**점수 분해**")
     for key, label in PART_LABELS.items():
         if key in rec.score.parts:
             lines.append(f"- {label}: {rec.score.parts[key]:+.1f}")
-    n_conf = len(rec.score.intra_conflicts)
-    n_pos = len(rec.score.kept_positives)
-    lines.append(f"- → 같은 팀 내 갈등쌍 **{n_conf}개**, 유지된 긍정쌍 {n_pos}개")
-    # 운영진 강제 제약 충족 여부
-    bt = len(rec.score.broken_together)
-    vs = len(rec.score.violated_separate)
+    lines.append(f"- → 같은 팀 갈등쌍 **{len(rec.score.intra_conflicts)}개**, "
+                 f"유지된 긍정쌍 {len(rec.score.kept_positives)}개, "
+                 f"고이슈 겹침 {rec.score.issue_stacks}건")
+    bt, vs = len(rec.score.broken_together), len(rec.score.violated_separate)
     if bt or vs:
         lines.append(f"- → ⚠️ 강제 제약 위반: 결합 {bt}쌍, 분리 {vs}쌍")
     lines.append("")
@@ -67,60 +65,55 @@ def render_recommendation(
     for team in rec.teams:
         names = ", ".join(f"{m.name}({m.mbti or '-'})" for m in team.members)
         comp = team.avg_competency()
-        comp_s = f"{comp:.2f}" if comp is not None else "N/A"
+        issue = sum(m.issue_level for m in team.members)
         lines.append(f"### 팀 {team.index + 1}  ({len(team.members)}명)")
         lines.append(f"- 멤버: {names}")
-        lines.append(f"- 성향분포: {_mbti_dist(team)}")
-        lines.append(f"- 역할: {_roles_in(team)}")
-        lines.append(f"- 평균 역량(보조): {comp_s}")
+        lines.append(f"- 성향: {_disps_in(team)}")
+        lines.append(f"- 리더 후보: {_leaders_in(team)}")
+        lines.append(f"- MBTI: {_mbti_dist(team)}")
+        lines.append(f"- 평균 역량(보조): {comp:.2f}" if comp is not None
+                     else "- 평균 역량(보조): N/A")
+        lines.append(f"- 이슈 총량: {issue:.0f}")
         lines.append("")
 
     if rec.score.intra_conflicts:
-        pairs = ", ".join(f"{a}-{b}" for a, b in rec.score.intra_conflicts)
-        lines.append(f"> ⚠️ 분리하지 못한 갈등쌍: {pairs}")
+        lines.append("> ⚠️ 분리하지 못한 갈등쌍: "
+                     + ", ".join(f"{a}-{b}" for a, b in rec.score.intra_conflicts))
         lines.append("")
     return "\n".join(lines)
 
 
-def render_report(
-    recs: list[Recommendation],
-    graph: RelationshipGraph,
-    *,
-    n_students: int,
-) -> str:
+def render_report(recs, graph: RelationshipGraph, *, n_students: int) -> str:
     head = [
         "# 수강생 팀빌딩 추천 리포트",
         "",
         f"- 대상 인원: {n_students}명",
-        f"- 관계 분석: 평가된 쌍 {graph.n_pairs}개 "
+        f"- 관계 분석: 관계쌍 {graph.n_pairs}개 "
         f"(갈등 {len(graph.conflicts)} · 긍정 {len(graph.positives)})",
         f"- 추천안 수: {len(recs)}개",
         "",
-        "> 우선순위: ①갈등 분리 ②긍정 관계 일부 유지 "
-        "③성향 균형/이전 팀 섞기 ④역할 배분 ⑤역량(보조)",
-        "",
-        "---",
-        "",
+        "> 우선순위: ①갈등 분리 ②긍정 유지 ③이슈 관리 ④성향/리더 ⑤역량(보조)",
+        "", "---", "",
     ]
     body = "\n---\n\n".join(
-        render_recommendation(i + 1, rec, graph) for i, rec in enumerate(recs)
-    )
+        render_recommendation(i + 1, rec, graph) for i, rec in enumerate(recs))
     return "\n".join(head) + body
 
 
-def write_csv(path: str, recs: list[Recommendation]) -> None:
-    """모든 추천안을 한 CSV로 저장 (option, team, id, name, mbti, roles...)."""
+def write_csv(path: str, recs) -> None:
     with open(path, "w", newline="", encoding="utf-8-sig") as fh:
         w = csv.writer(fh)
         w.writerow(["option", "team", "id", "name", "mbti",
-                    "primary_role", "secondary_role",
-                    "instructor_score", "prev_team"])
+                    "primary_disp", "secondary_disp", "leadership",
+                    "overall", "issue_level", "issue_note", "leader_candidate"])
         for oi, rec in enumerate(recs, start=1):
             for team in rec.teams:
                 for m in team.members:
                     w.writerow([
                         oi, team.index + 1, m.id, m.name, m.mbti,
-                        m.primary_role or "", m.secondary_role or "",
-                        "" if m.instructor_score is None else m.instructor_score,
-                        m.prev_team or "",
+                        m.primary_disp or "", m.secondary_disp or "",
+                        "" if m.leadership is None else m.leadership,
+                        "" if m.overall is None else m.overall,
+                        m.issue_level, m.issue_note,
+                        "Y" if m.is_leader_candidate() else "",
                     ])

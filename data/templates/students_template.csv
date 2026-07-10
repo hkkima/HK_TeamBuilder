@@ -1,3 +1,3 @@
-id,name,mbti,personality_summary,instructor_score,primary_role,secondary_role,prev_team
-S01,홍길동,ENFP,주도적이고 아이디어가 많음. 마감 관리가 약함.,4.2,리더,분위기메이커,A
-S02,김영희,ISTJ,꼼꼼하고 책임감 강함. 새 시도에 보수적.,3.8,서포터,연구자,A
+id,name,overall,leadership,management,planning,execution,communication,primary_disp,secondary_disp,mbti,issue_level,issue_note
+S01,김규장,7.3,1,2,4,4,2,작업자,연구자,INTP,1,타인 비교가 잦음 / 불안형 / 에고가 강한 편
+S02,김민성,8.3,2,3,2,4,3,매니저,연구자,ESTJ,,

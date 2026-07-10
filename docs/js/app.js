@@ -7,19 +7,21 @@
 
   const PART_LABELS = {
     force_together: "강제 결합", force_separate: "강제 분리",
-    conflict: "갈등 분리", positive: "긍정 유지", prev_mix: "이전 팀 섞기",
-    mbti_balance: "성향(MBTI)", role_coverage: "역할 배분",
-    leader_balance: "리더 분포", competency_balance: "역량(보조)",
+    conflict: "갈등 분리", positive: "긍정 유지",
+    issue_stack: "고이슈 격리", issue_balance: "이슈 분산",
+    disp_diversity: "성향 다양성", leader: "리더 확보", mbti_balance: "MBTI 균형",
+    competency_coverage: "역량 커버리지", competency_balance: "역량(보조)",
   };
 
   const STUDENTS_TEMPLATE =
-    "id,name,mbti,personality_summary,instructor_score,primary_role,secondary_role,prev_team\n" +
-    "S01,홍길동,ENFP,주도적이고 아이디어가 많음.,4.2,리더,분위기메이커,A\n" +
-    "S02,김영희,ISTJ,꼼꼼하고 책임감 강함.,3.8,서포터,연구자,A\n";
-  const EVALS_TEMPLATE =
-    "rater_id,ratee_id,collaboration,contribution,communication,again,comment\n" +
-    "S01,S02,5,4,5,5,믿고 맡길 수 있었음\n" +
-    "S02,S01,3,4,2,2,소통이 어려웠음\n";
+    "id,name,overall,leadership,management,planning,execution,communication," +
+    "primary_disp,secondary_disp,mbti,issue_level,issue_note\n" +
+    "S01,김규장,7.3,1,2,4,4,2,작업자,연구자,INTP,1,타인 비교가 잦음 / 불안형\n" +
+    "S02,김민성,8.3,2,3,2,4,3,매니저,연구자,ESTJ,,\n";
+  const RELATIONS_TEMPLATE =
+    "DATE,FROM,TO,TYPE,W,NOTE\n" +
+    "2026-06-10,김규장,이제희,NEG,3,소통이 전혀 되지 않음\n" +
+    "2026-07-09,윤희성,박송호,POS,3,함께하고 싶은 팀원 (추진력)\n";
 
   // ---- 상태 ----
   const state = {
@@ -58,9 +60,6 @@
   }
 
   // ---- 입력 로딩 ----
-  function readThresholds() {
-    return { conflictThreshold: Number($("conflict-th").value), positiveThreshold: Number($("positive-th").value) };
-  }
   function readWeights() {
     const w = {};
     Object.keys(TB.DEFAULT_WEIGHTS).forEach((k) => {
@@ -79,17 +78,18 @@
   // 입력 CSV를 로딩해 state에 반영. 실패 시 예외.
   function loadInputs() {
     const students = TB.loadStudents($("ta-students").value.trim());
-    let evals = [];
-    const eText = $("ta-evals").value.trim();
-    if (eText) evals = TB.loadEvals(eText, new Set(students.map((s) => s.id)));
-    const graph = TB.buildGraph(students, evals, readThresholds());
+    let relations = [];
+    const rText = $("ta-relations").value.trim();
+    if (rText) relations = TB.loadRelations(rText, students);
+    const graph = TB.buildGraph(students, relations);
     const cons = readConstraints();
     state.students = students;
     state.byId = new Map(students.map((s) => [s.id, s]));
     state.graph = graph;
     state.weights = readWeights();
-    state.forceTogether = TB.pairsToSet(cons.forceTogether);
-    state.forceSeparate = TB.pairsToSet(cons.forceSeparate);
+    // 강제 규칙 토큰(이름/ id)을 id 쌍으로 해석
+    state.forceTogether = TB.pairsToSet(TB.resolvePairs(cons.forceTogether, students));
+    state.forceSeparate = TB.pairsToSet(TB.resolvePairs(cons.forceSeparate, students));
     return students;
   }
 
@@ -99,11 +99,11 @@
     try {
       const students = TB.loadStudents(sText);
       let msg = `학생 ${students.length}명 인식`;
-      const eText = $("ta-evals").value.trim();
-      if (eText) {
-        const evals = TB.loadEvals(eText, new Set(students.map((s) => s.id)));
-        const g = TB.buildGraph(students, evals, readThresholds());
-        msg += ` · 평가쌍 ${g.nPairs} (갈등 ${g.conflicts.size}·긍정 ${g.positives.size})`;
+      const rText = $("ta-relations").value.trim();
+      if (rText) {
+        const relations = TB.loadRelations(rText, students);
+        const g = TB.buildGraph(students, relations);
+        msg += ` · 관계쌍 ${g.nPairs} (갈등 ${g.conflicts.size}·긍정 ${g.positives.size})`;
       }
       setStatus(msg, "ok");
       $("btn-blank").disabled = false;
@@ -273,16 +273,21 @@
       return `${ax[0]}${cp}/${ax[1]}${known.length - cp}`;
     }).join(" ");
   }
-  function rolesIn(members) {
-    const map = {}; TB.STANDARD_ROLES.forEach((r) => (map[r] = 0));
-    members.forEach((m) => { if (map[m.primary_role] != null) map[m.primary_role]++; });
-    const parts = TB.STANDARD_ROLES.filter((r) => map[r]).map((r) => `${r}${map[r]}`);
-    return parts.length ? parts.join(" ") : "역할 –";
+  function dispIn(members) {
+    const map = {}; TB.DISPOSITIONS.forEach((r) => (map[r] = 0));
+    members.forEach((m) => { if (map[m.primary_disp] != null) map[m.primary_disp]++; });
+    const parts = TB.DISPOSITIONS.filter((r) => map[r]).map((r) => `${r}${map[r]}`);
+    return parts.length ? parts.join(" ") : "성향 –";
   }
   function avgComp(members) {
-    const v = members.filter((m) => m.instructor_score != null).map((m) => m.instructor_score);
+    const v = members.map(TB.compValue).filter((x) => x != null);
     return v.length ? (v.reduce((s, x) => s + x, 0) / v.length).toFixed(2) : "–";
   }
+  function leadersIn(members) {
+    const ls = members.filter(TB.leaderCandidate).map((m) => m.name);
+    return ls.length ? ls.join(", ") : "없음";
+  }
+  function issueSum(members) { return members.reduce((s, m) => s + (m.issue_level || 0), 0); }
 
   function renderCompList() {
     const el = $("comp-list");
@@ -310,7 +315,7 @@
       ? state.compositions[state.activeIndex].name : "새 편성";
     const dirtyTag = state.dirty ? ' <b style="color:var(--warn)">· 미저장 변경</b>' : "";
     $("summary").innerHTML =
-      `대상 <b>${nStu}명</b> · 평가쌍 ${g.nPairs} (갈등 ${g.conflicts.size} · 긍정 ${g.positives.size})` +
+      `대상 <b>${nStu}명</b> · 관계쌍 ${g.nPairs} (갈등 ${g.conflicts.size} · 긍정 ${g.positives.size})` +
       ` · 표시 중: <b>${escapeHtml(activeName)}</b>${dirtyTag}` +
       (poolN ? ` · <b style="color:var(--bad)">미배정 ${poolN}명</b>` : "");
 
@@ -341,14 +346,17 @@
   function blockHtml(m, marker, isLeader, inPool) {
     const cls = "block" + (marker ? " " + marker : "") + (isLeader ? " leader" : "") +
       (state.selectedId === m.id ? " selected" : "");
-    const role = m.primary_role ? `<span class="role-tag">${escapeHtml(m.primary_role)}</span>` : "";
-    const comp = m.instructor_score != null ? `<span class="comp-val">역량 ${m.instructor_score}</span>` : "";
+    const disp = m.primary_disp ? `<span class="role-tag">${escapeHtml(m.primary_disp)}</span>` : "";
+    const cand = TB.leaderCandidate(m) ? '<span class="cand" title="리더 후보">★</span>' : "";
+    const cv = TB.compValue(m);
+    const comp = cv != null ? `<span class="comp-val">역량 ${cv}</span>` : "";
+    const iss = (m.issue_level || 0) > 0
+      ? `<span class="issue-badge lv${m.issue_level}" title="이슈 강도 ${m.issue_level}${m.issue_note ? " · " + escapeHtml(m.issue_note) : ""}">⚠${m.issue_level}</span>` : "";
     const crown = inPool ? "" :
       `<button class="btn-leader${isLeader ? " on" : ""}" data-id="${escapeHtml(m.id)}" title="팀장 지정/해제">👑</button>`;
-    return `<div class="${cls}" draggable="true" data-id="${escapeHtml(m.id)}">
-      <div class="b-top"><span class="prev-dot" style="background:${prevColor(m.prev_team)}" title="이전팀 ${escapeHtml(m.prev_team || "-")}"></span>
-        <span class="mbti">${escapeHtml(m.mbti || "–")}</span><span class="b-name">${escapeHtml(m.name)}</span>${crown}</div>
-      <div class="b-sub">${role}${comp}</div></div>`;
+    return `<div class="${cls}" draggable="true" data-id="${escapeHtml(m.id)}" title="${escapeHtml(m.issue_note || "")}">
+      <div class="b-top"><span class="mbti">${escapeHtml(m.mbti || "–")}</span><span class="b-name">${escapeHtml(m.name)}</span>${cand}${iss}${crown}</div>
+      <div class="b-sub">${disp}${comp}</div></div>`;
   }
 
   function renderBoard(sb) {
@@ -381,7 +389,7 @@
       return `<div class="team-col" data-zone="team-${ti}">
         <div class="team-head">
           <div class="team-title">팀 ${ti + 1} <span class="tcount">${members.length}명</span></div>
-          <div class="team-meta">${mbtiDist(members)} · ${rolesIn(members)} · 역량 ${avgComp(members)}</div>
+          <div class="team-meta">${dispIn(members)} · 역량 ${avgComp(members)} · 이슈 ${issueSum(members)}<br>리더후보: ${escapeHtml(leadersIn(members))}</div>
           <div class="team-leader">👑 팀장: ${leadName}</div>${warn}
           <textarea class="team-note" data-team="${ti}" rows="1" placeholder="운영자 메모…">${escapeHtml(note)}</textarea>
         </div>
@@ -405,15 +413,17 @@
   // ---- CSV 내보내기 (목록의 모든 조합) ----
   function exportCsv() {
     if (!state.compositions.length) { setStatus("내보낼 조합이 없습니다. 먼저 저장하세요.", "bad"); return; }
-    let csv = "﻿composition,team,team_note,is_leader,id,name,mbti,primary_role,secondary_role,instructor_score,prev_team\n";
+    let csv = "﻿composition,team,team_leader,team_note,id,name,mbti,primary_disp,secondary_disp," +
+      "overall,leadership,issue_level,issue_note,leader_candidate\n";
     state.compositions.forEach((c) => {
       const notes = c.notes || c.teams.map(() => "");
       const leaders = c.leaderByTeam || c.teams.map(() => null);
       c.teams.forEach((ids, ti) => {
         studentsOf(ids).forEach((m) => {
-          const cells = [c.name, ti + 1, notes[ti] || "", leaders[ti] === m.id ? "Y" : "",
-            m.id, m.name, m.mbti, m.primary_role || "",
-            m.secondary_role || "", m.instructor_score == null ? "" : m.instructor_score, m.prev_team || ""];
+          const cells = [c.name, ti + 1, leaders[ti] === m.id ? "Y" : "", notes[ti] || "",
+            m.id, m.name, m.mbti, m.primary_disp || "", m.secondary_disp || "",
+            m.overall == null ? "" : m.overall, m.leadership == null ? "" : m.leadership,
+            m.issue_level || 0, m.issue_note || "", TB.leaderCandidate(m) ? "Y" : ""];
           csv += cells.map((v) => { const s = String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(",") + "\n";
         });
       });
@@ -500,7 +510,7 @@
   // ---- 초기화 (로그인 성공 후 호출됨) ----
   window.AppInit = function () {
     bindFile("file-students", "ta-students");
-    bindFile("file-evals", "ta-evals");
+    bindFile("file-relations", "ta-relations");
     bindBoardEvents();
     bindCompListEvents();
 
@@ -511,11 +521,11 @@
     });
     $("btn-sample").addEventListener("click", function () {
       $("ta-students").value = window.SAMPLE_STUDENTS.trim() + "\n";
-      $("ta-evals").value = window.SAMPLE_EVALS.trim() + "\n";
+      $("ta-relations").value = window.SAMPLE_RELATIONS.trim() + "\n";
       updateDataStatus();
     });
     $("btn-tmpl-students").addEventListener("click", () => download("students_template.csv", "﻿" + STUDENTS_TEMPLATE));
-    $("btn-tmpl-evals").addEventListener("click", () => download("peer_evaluations_template.csv", "﻿" + EVALS_TEMPLATE));
+    $("btn-tmpl-relations").addEventListener("click", () => download("relations_template.csv", "﻿" + RELATIONS_TEMPLATE));
     $("btn-run").addEventListener("click", run);
     $("btn-blank").addEventListener("click", startBlank);
     $("btn-save-comp").addEventListener("click", saveComposition);

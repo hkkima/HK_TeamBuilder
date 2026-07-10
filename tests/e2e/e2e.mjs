@@ -58,7 +58,7 @@ function genData(n, seed = 7) {
     "--n", String(n), "--seed", String(seed), "--out-dir", dir]);
   return {
     students: readFileSync(path.join(dir, "students.csv"), "utf-8"),
-    evals: readFileSync(path.join(dir, "peer_evaluations.csv"), "utf-8"),
+    relations: readFileSync(path.join(dir, "relations.csv"), "utf-8"),
     meta: JSON.parse(readFileSync(path.join(dir, "meta.json"), "utf-8")),
   };
 }
@@ -110,7 +110,7 @@ async function run() {
       await page.fill("#ta-together", "");
       await page.fill("#ta-apart", "");
       await page.fill("#ta-students", data.students);
-      await page.fill("#ta-evals", data.evals);
+      await page.fill("#ta-relations", data.relations);
       // 인식 상태 갱신 대기
       await page.waitForFunction(
         (n) => document.getElementById("data-status").textContent.includes(`학생 ${n}명`),
@@ -155,6 +155,11 @@ async function run() {
       check(sizes.reduce((a, b) => a + b, 0) === c.n, "팀 크기 합 = 인원수");
       check(Math.max(...sizes) - Math.min(...sizes) <= 1, "팀 크기 균형(차이 ≤1)");
       check(result.okFlag, "표시 조합: 같은 팀 내 갈등쌍 0개(✅)");
+      // 고이슈(⚠2/⚠3) 학생이 한 팀에 2명 이상 몰리지 않는지
+      const hiPerTeam = await page.evaluate(() =>
+        [...document.querySelectorAll("#board .teams-grid .team-col")].map((c) =>
+          c.querySelectorAll(".issue-badge.lv2, .issue-badge.lv3").length));
+      check(Math.max(0, ...hiPerTeam) <= 1, "고이슈 학생 팀당 최대 1명(격리)");
 
       // 목록에서 다른 조합 선택 → 보드 교체 (조합이 2개 이상일 때)
       if (result.chips.length >= 2) {
@@ -231,9 +236,9 @@ async function run() {
         const lines = csvText.trim().split("\n");
         check(lines.length === 1 + afterSave.chips.length * c.n,
           `CSV 행 수 ${lines.length} = 1+${afterSave.chips.length}×${c.n}`);
-        check(lines[0].startsWith("composition,team,team_note,is_leader,id,name"),
-          "CSV 헤더에 team_note·is_leader 포함");
-        check(lines.some((ln) => ln.split(",")[3] === "Y"), "CSV에 팀장(is_leader=Y) 행 존재");
+        check(lines[0].startsWith("composition,team,team_leader,team_note,id,name"),
+          "CSV 헤더에 team_leader·team_note 포함");
+        check(lines.some((ln) => ln.split(",")[2] === "Y"), "CSV에 팀장(team_leader=Y) 행 존재");
         check(csvText.includes(NOTE), "CSV에 팀 메모 포함");
       }
 

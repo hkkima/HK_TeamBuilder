@@ -36,18 +36,18 @@
         <div class="row">
           <button id="btn-sample" class="primary">샘플 데이터 불러오기</button>
           <button id="btn-tmpl-students" class="ghost">학생 템플릿</button>
-          <button id="btn-tmpl-evals" class="ghost">평가 템플릿</button>
+          <button id="btn-tmpl-relations" class="ghost">관계 템플릿</button>
         </div>
 
         <div class="field">
-          <label>수강생 CSV (students)</label>
+          <label>수강생 마스터 CSV (이름·역량·성향·MBTI·이슈)</label>
           <input id="file-students" type="file" accept=".csv" />
           <textarea id="ta-students" rows="4" placeholder="여기에 CSV를 붙여넣거나 위에서 파일 선택"></textarea>
         </div>
         <div class="field">
-          <label>상호평가 CSV (peer_evaluations) — 선택</label>
-          <input id="file-evals" type="file" accept=".csv" />
-          <textarea id="ta-evals" rows="4" placeholder="평가 데이터가 없으면 성향/역할만으로 구성"></textarea>
+          <label>관계 평가 CSV (FROM,TO,TYPE=POS/NEG,W,NOTE) — 선택</label>
+          <input id="file-relations" type="file" accept=".csv" />
+          <textarea id="ta-relations" rows="4" placeholder="관계 데이터가 없으면 성향·역량·이슈만으로 구성"></textarea>
         </div>
         <div id="data-status" class="status"></div>
 
@@ -94,18 +94,18 @@
         </div>
 
         <details class="adv">
-          <summary>고급: 가중치 / 임계값</summary>
-          <p class="muted">관계·성향 우선, 역량은 보조가 기본값입니다.</p>
+          <summary>고급: 가중치 / 강도</summary>
+          <p class="muted">관계·성향·이슈 우선, 역량은 보조가 기본값입니다.</p>
           <div class="grid2">
             <label>갈등 분리<input id="w-conflict" type="number" step="1" value="100" /></label>
             <label>긍정 유지<input id="w-positive" type="number" step="1" value="8" /></label>
-            <label>이전 팀 섞기<input id="w-prev_mix" type="number" step="1" value="6" /></label>
-            <label>성향(MBTI)<input id="w-mbti_balance" type="number" step="1" value="16" /></label>
-            <label>역할 배분<input id="w-role_coverage" type="number" step="1" value="14" /></label>
-            <label>리더 분포<input id="w-leader_balance" type="number" step="1" value="12" /></label>
-            <label>역량(보조)<input id="w-competency_balance" type="number" step="1" value="6" /></label>
-            <label>갈등 임계<input id="conflict-th" type="number" step="0.1" value="2.0" /></label>
-            <label>긍정 임계<input id="positive-th" type="number" step="0.1" value="4.0" /></label>
+            <label>고이슈 격리<input id="w-issue_stack" type="number" step="1" value="40" /></label>
+            <label>이슈 분산<input id="w-issue_balance" type="number" step="1" value="10" /></label>
+            <label>성향 다양성<input id="w-disp_diversity" type="number" step="1" value="16" /></label>
+            <label>리더 확보<input id="w-leader" type="number" step="1" value="14" /></label>
+            <label>MBTI 균형<input id="w-mbti_balance" type="number" step="1" value="8" /></label>
+            <label>역량 커버리지<input id="w-competency_coverage" type="number" step="1" value="8" /></label>
+            <label>역량 평준화(보조)<input id="w-competency_balance" type="number" step="1" value="6" /></label>
             <label>갈등 강도<input id="w-conflict_intensity" type="number" step="0.1" value="1.0" /></label>
             <label>긍정 강도<input id="w-positive_intensity" type="number" step="0.1" value="0.5" /></label>
             <label>강제 결합 W<input id="w-force_together" type="number" step="50" value="1000" /></label>

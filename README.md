@@ -1,11 +1,15 @@
 # 수강생 팀빌더 (HK TeamBuilder)
 
-23명 규모 수강생을 **개인간 관계도 + 성향** 위주로 분석해 팀을 짜고,
+수강생을 **개인간 관계도 + 성향 + 이슈 관리** 위주로 분석해 팀을 짜고,
 서로 다른 추천안 여러 개를 제시하는 도구입니다. 역량 수준은 **보조 지표**로만 사용합니다.
+
+> **v2** — 최종 트래킹 폼 기준으로 데이터 모델을 재설계했습니다.
+> 성향 6종(작업자·매니저·분위기메이커·책임자·연구자·서포터), 역량 5차원(리더십·관리·기획·작업·소통)
+> + 종합역량, **이슈 강도(1–3)**, 그리고 방향성 **관계 평가(POS/NEG + 가중치 W)**.
 
 - **웹 프론트(GitHub Pages)** + **Python CLI** 두 가지 사용 방식 제공
 - 설치 불필요: Python 3.9+ 표준 라이브러리만 사용 (pandas 등 의존성 없음)
-- 입력은 CSV 2개(수강생 정보 / 이전 팀플 상호평가), 출력은 Markdown/HTML 리포트 + CSV
+- 입력 CSV 2개(**수강생 마스터** / **관계 평가**) + 선택(강제 규칙), 출력은 리포트 + CSV
 
 ## 웹 프론트 (운영진 공유용)
 
@@ -17,7 +21,7 @@
 
 로직은 **초안**을 만들고, 최종 조정은 운영진이 손으로 합니다.
 
-- **수강생 = 블럭**: 이름·MBTI·역할·역량·이전팀(색상 점)을 담은 블럭을 **드래그해 팀 사이로 이동**
+- **수강생 = 블럭**: 이름·MBTI·성향·역량·리더후보(★)·이슈배지(⚠)를 담은 블럭을 **드래그해 팀 사이로 이동**
   (모바일/트랙패드는 블럭 클릭 → 대상 팀 클릭). 옮길 때마다 **점수·갈등·강제규칙이 즉시 갱신**됩니다.
 - **화면엔 조합 하나만**: 추천안 3개는 상단 **조합 목록**에서 골라 보드에 표시합니다.
 - **내가 조립한 조합 저장**: 손으로 고친 편성을 **현재 조합 저장**으로 목록에 추가.
@@ -27,7 +31,7 @@
   팀장·메모는 조합별로 저장·불러오기되고 CSV에도 포함됩니다.
 - 같은 팀 갈등쌍은 블럭이 빨갛게, 강제 결합이 깨지면 노랗게 표시됩니다.
 - **CSV 내보내기**는 목록의 모든 조합을
-  `composition,team,team_note,is_leader,id,…` 형식으로 저장합니다.
+  `composition,team,team_leader,team_note,id,name,mbti,primary_disp,…,issue_level,…` 형식으로 저장합니다.
 
 ### GitHub Pages 배포 (1회 설정)
 
@@ -58,24 +62,24 @@ cd docs && python3 -m http.server 8000   # http://localhost:8000 접속
 
 ## 우선순위 (알고리즘 목표)
 
-1. **갈등 분리** — 상호평가가 나빴던 쌍을 다른 팀으로 (가장 강한 제약)
-2. **긍정 관계 일부 유지** — 서로 높게 평가한 쌍 일부는 같은 팀에
-3. **성향 균형 + 이전 팀 섞기** — MBTI 4축이 골고루, 이전 6인 팀은 분산
-4. **역할 배분** — 리더 · 서포터 · 분위기메이커 · 연구자가 팀마다 고루
-5. **역량(보조)** — 강사 평가 평균이 팀 간 비슷하게 평준화
+1. **갈등 분리** — NEG 관계(가중치 W 강도 반영)를 다른 팀으로 (사실상 하드)
+2. **긍정 유지** — POS 관계(W 강도 반영)를 일부 같은 팀에
+3. **이슈 관리** — 고이슈(강도 ≥2) 학생끼리 같은 팀 회피 + 팀 간 이슈 총량 균등 분산
+4. **성향 다양성 + 리더 확보** — 성향 6종이 팀마다 고루, 리더 후보(리더십↑ 또는 책임자·매니저) 최소 1명
+5. **역량(보조)** — 팀 평균 평준화 + 핵심역량(기획·작업·소통) 커버리지
 
-각 항목 가중치는 CLI 플래그로 조정할 수 있습니다(아래 참조).
+각 항목 가중치는 CLI 플래그/웹 고급설정으로 조정할 수 있습니다(아래 참조).
 
 ## 빠른 시작
 
 ```bash
-# 1) 샘플 데이터 생성 (23명, 이전 6인 1팀 상호평가 포함)
+# 1) 샘플 데이터 생성 (23명: 마스터 + 관계 + 이슈)
 python data/make_sample.py
 
 # 2) 4개 팀으로 추천안 3개 생성
 python build_teams.py \
     --students data/sample/students.csv \
-    --evals data/sample/peer_evaluations.csv \
+    --relations data/sample/relations.csv \
     --teams 4 --options 3
 ```
 
@@ -85,33 +89,36 @@ python build_teams.py \
 
 `data/templates/`의 두 파일을 복사해 값을 채우면 됩니다.
 
-### `students_template.csv` — 수강생 정보
+### `students_template.csv` — 수강생 마스터
 | 컬럼 | 필수 | 설명 |
 |---|---|---|
-| `id` | ✅ | 고유 식별자 (예: S01) |
-| `name` | ✅ | 이름(익명 가능) |
-| `mbti` |  | 예: ENFP (성향 균형 계산에 사용) |
-| `personality_summary` |  | 성향 요약 텍스트 |
-| `instructor_score` |  | 강사진 평가(역량). 숫자. **보조 지표** |
-| `primary_role` |  | 주 역할: 리더/서포터/분위기메이커/연구자 |
-| `secondary_role` |  | 부 역할 |
-| `prev_team` |  | 이전 팀플 팀 식별자(섞기에 사용) |
+| `name`(이름) | ✅ | 이름. **관계 파일의 join 키** (중복 시 `id`로 구분) |
+| `id` |  | 고유 식별자(예: S01). 없으면 이름을 id로 사용 |
+| `overall`(종합 역량) |  | 종합 역량 값. **보조 지표** (평준화용) |
+| `leadership`(리더십) |  | 1~3 |
+| `management`(관리 능력) |  | 1~3 |
+| `planning`(기획 역량) |  | 1~5 |
+| `execution`(작업 역량) |  | 1~5 |
+| `communication`(소통 능력) |  | 1~5 |
+| `primary_disp`(주 성향) |  | 작업자·매니저·분위기메이커·책임자·연구자·서포터 |
+| `secondary_disp`(부 성향) |  | 위 6종 |
+| `mbti` |  | 예: INTP |
+| `issue_level`(이슈 강도) |  | 0~3 (0/빈칸=없음). ≥2면 격리·분산 대상 |
+| `issue_note`(이슈 비고) |  | 자유 텍스트 |
+| `단원*` / `unit*` |  | 단원별 점수(자동 감지). 종합역량 없으면 평균으로 대체 |
 
-> 역할 데이터는 나중에 추가되어도 됩니다. 비어 있으면 역할 배분 항목만 자동으로 빠집니다.
-
-### `peer_evaluations.csv` — 이전 팀플 상호평가 (양방향, rater→ratee)
+### `relations_template.csv` — 관계 평가 (방향성)
 | 컬럼 | 필수 | 설명 |
 |---|---|---|
-| `rater_id` | ✅ | 평가자 id |
-| `ratee_id` | ✅ | 피평가자 id |
-| `collaboration` |  | 협업/태도 (0~5 권장) |
-| `contribution` |  | 기여도 |
-| `communication` |  | 소통 |
-| `again` |  | 다시 같은 팀? (0~5). **갈등 신호로 2배 가중** |
-| `comment` |  | 자유 코멘트 |
+| `FROM` | ✅ | 평가자 (이름 또는 id) |
+| `TO` | ✅ | 대상 (이름 또는 id) |
+| `TYPE` | ✅ | `POS`(긍정) 또는 `NEG`(부정) |
+| `W` |  | 가중치/강도 1~3 (기본 1). **그대로 severity/strength에 반영** |
+| `NOTE` |  | 자유 텍스트 |
+| `DATE` |  | 날짜(선택) |
 
-6인 1팀이었다면 같은 팀 안에서 서로를 평가한 행들을 그대로 넣으면 됩니다.
-모든 쌍이 평가될 필요는 없습니다.
+한 쌍에 여러 행(시점별)이 있어도 됩니다 — POS/NEG 가중치를 합산해 판단합니다.
+`negW>0` 이고 `net(=posW−negW)≤0` 이면 갈등쌍, 순수 긍정이면 긍정쌍.
 
 ### `constraints.csv` — 운영진 강제 규칙 (선택)
 운영진이 데이터와 무관하게 특정 쌍을 **강제로 같은 팀** 또는 **강제로 다른 팀**에
@@ -131,11 +138,10 @@ python build_teams.py \
 
 ## 관계도가 만들어지는 방식
 
-- 두 사람의 양방향 점수를 평균해 **상호 점수(0~5)** 산출
-- 상호 점수가 낮거나 한쪽이라도 강하게 부정 → **갈등쌍**
-  (기본 임계: `--conflict-threshold 2.0`)
-- 상호 점수가 높음 → **긍정쌍** (기본 `--positive-threshold 4.0`)
-- `again`(다시 같은 팀 하고 싶은가)은 갈등/선호의 가장 강한 신호로 2배 가중
+- 방향성 관계를 무방향 쌍으로 합산: `posW`(POS 가중치 합), `negW`(NEG 합), `net = posW − negW`
+- **갈등쌍**: `negW>0` 이고 `net≤0` → severity = `negW/(2·maxW)`
+- **긍정쌍**: `posW>0` 이고 `negW==0` → strength = `posW/(2·maxW)`
+- W(1~3)가 곧 강도이므로 severity/strength에 직접 반영 (혼재 & net>0 은 중립)
 
 ## 최적화 방식
 
@@ -151,41 +157,42 @@ python build_teams.py \
 | 파라미터 | 기본 | 의미 |
 |---|---|---|
 | `--w-conflict` | 100 | 갈등 분리(사실상 하드) |
-| `--w-positive` | 8 | 긍정 관계 유지 |
-| `--w-prev-mix` | 6 | 이전 팀 섞기 |
-| `--w-mbti` | 16 | 성향(MBTI) 균형 |
-| `--w-role` | 14 | 역할 배분 |
-| `--w-leader` | 12 | 리더 분포 |
-| `--w-competency` | 6 | 역량 평준화(보조) |
+| `--w-positive` | 8 | 긍정 유지 |
+| `--w-issue-stack` | 40 | 고이슈(≥2) 2명↑ 같은 팀 격리 |
+| `--w-issue-balance` | 10 | 팀 간 이슈 총량 균등 분산 |
+| `--w-disp-diversity` | 16 | 성향 6종 다양성 |
+| `--w-leader` | 14 | 팀별 리더 후보 확보 |
+| `--w-mbti-balance` | 8 | MBTI 균형 |
+| `--w-competency-coverage` | 8 | 핵심역량(기획·작업·소통) 커버리지 |
+| `--w-competency-balance` | 6 | 역량 평준화(보조) |
 
-**② 강도(intensity) · 형태** — "갈등의 강도"처럼 *정도*를 반영
+**② 강도(intensity) · 형태**
 | 파라미터 | 기본 | 의미 |
 |---|---|---|
-| `--conflict-intensity` | 1.0 | 0=모든 갈등 동일 취급, 클수록 **심한 갈등에 더 큰 페널티**. 실효가중 = base·(1+intensity·강도). 강도는 평가점수가 임계 아래로 얼마나 떨어졌는지로 0~1 산출 |
-| `--positive-intensity` | 0.5 | 강한 긍정 쌍을 더 우선 유지 |
-| `--competency-metric` | stdev | 역량 **평준화 방식**: `stdev`(전반 평준화) 또는 `range`(최고-최저 팀 격차 억제) |
-| `--conflict-threshold` | 2.0 | 갈등 분류 임계 |
-| `--positive-threshold` | 4.0 | 긍정 분류 임계 |
+| `--conflict-intensity` | 1.0 | 0=모든 갈등 동일, 클수록 **강한(W↑) 갈등에 더 큰 페널티**. 실효가중 = base·(1+intensity·severity) |
+| `--positive-intensity` | 0.5 | 강한 긍정(W↑)을 더 우선 유지 |
+| `--competency-metric` | stdev | 역량 **평준화 방식**: `stdev`(전반) 또는 `range`(최악격차 억제) |
+| `--max-weight` | 3.0 | W 척도 상한(severity/strength 정규화 기준) |
 
-**③ 운영진 강제 제약(하드)** — `constraints.csv`로 입력, 가중치는 보통 건드릴 필요 없음
+**③ 운영진 강제 제약(하드)** — `constraints.csv`로 입력
 | 파라미터 | 기본 | 의미 |
 |---|---|---|
-| `--w-force-together` | 1000 | 강제 결합 위반 페널티(데이터 갈등 100보다 훨씬 큼) |
+| `--w-force-together` | 1000 | 강제 결합 위반 페널티 |
 | `--w-force-separate` | 1000 | 강제 분리 위반 페널티 |
 
 **기타 실행 옵션**
 ```
 --teams N            팀 개수 (자동 균등 분배). 23명, 4팀 → 6/6/6/5
---sizes 6,6,6,5      팀 크기 직접 지정 (합이 인원수와 같아야 함)
+--sizes 6,6,6,5      팀 크기 직접 지정
 --constraints f.csv  운영진 강제 규칙 파일
 --options 3          추천안 개수
---restarts 60        최적화 재시작 횟수 (많을수록 품질↑, 느려짐)
+--restarts 60        최적화 재시작 횟수
 --seed 42            난수 시드(재현성)
 ```
 
 예시:
 ```bash
-python build_teams.py --students s.csv --evals e.csv --constraints c.csv \
+python build_teams.py --students s.csv --relations r.csv --constraints c.csv \
     --teams 4 --conflict-intensity 1.5 --competency-metric range
 ```
 
@@ -193,7 +200,7 @@ python build_teams.py --students s.csv --evals e.csv --constraints c.csv \
 
 각 추천안마다:
 - **점수 분해**: 항목별 기여(+/-)와 같은 팀 내 갈등쌍/긍정쌍 개수
-- **팀별**: 멤버(MBTI), 성향분포(4축), 역할 구성, 평균 역량(보조)
+- **팀별**: 멤버(MBTI), 성향 분포(6종), 리더 후보, 이슈 총량, 평균 역량(보조)
 - 분리하지 못한 갈등쌍이 있으면 ⚠️로 표시
 - 운영진 강제 규칙 위반이 있으면 ⚠️로 표시 (정상이면 ✅)
 
@@ -217,14 +224,14 @@ docs/                     GitHub Pages 정적 웹 앱
   js/sample.js            내장 샘플 데이터
 build_teams.py            CLI 진입점
 teambuilder/
-  models.py               데이터 모델(학생/평가/팀), 역할 정규화
-  loader.py               CSV 로딩·검증 (students/evals/constraints)
-  relationship.py         상호평가 → 관계 그래프(갈등/긍정 + 강도)
-  scoring.py              구성안 점수화(가중합 + 강도 + 강제 제약)
+  models.py               데이터 모델(학생·관계·팀), 성향 정규화
+  loader.py               CSV 로딩·검증 (students/relations/constraints, 이름 해석)
+  relationship.py         관계(POS/NEG·W) → 그래프(갈등/긍정 + 강도)
+  scoring.py              점수화(갈등·긍정·이슈·성향·리더·역량 + 강제)
   builder.py              제약 검증·초기배치 + 지역탐색 + 다중 추천안
   report.py               Markdown/CSV 리포트
 data/
-  templates/              입력 템플릿 CSV (students/evals/constraints)
+  templates/              입력 템플릿 CSV (students/relations/constraints)
   sample/                 샘플 데이터(make_sample.py로 생성)
   make_sample.py          재현 가능한 샘플 생성기(파라미터화)
 tests/

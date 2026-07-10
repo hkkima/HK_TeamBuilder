@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-"""재현 가능한 샘플 데이터 생성기 (파라미터화).
+"""재현 가능한 샘플 데이터 생성기 (v2 — 최종 트래킹 폼 기준).
 
-이전 팀플은 6인 1팀 구조라고 가정하고 N명을 prev_team으로 묶은 뒤,
-같은 이전 팀 안에서 양방향 상호평가를 생성한다. 일부 쌍에 의도적으로
-'갈등'/'긍정'을 주입해 빌더가 갈등을 분리하고 긍정을 유지하는지 검증할 수 있다.
+산출: <out-dir>/students.csv, relations.csv, meta.json
+  - students: 종합역량 + 역량5차원 + 성향(주/부) + MBTI + 이슈강도/비고
+  - relations: FROM,TO,TYPE(POS/NEG),W,NOTE,DATE (이름으로 참조)
 
-기본 실행(23명):  python data/make_sample.py
-임의 규모:        python data/make_sample.py --n 60 --seed 7 --out-dir data/n60
-
-갈등쌍은 항상 '매칭'(각 사람이 최대 1개의 갈등쌍에만 속함)으로 주입하므로
-팀이 2개 이상이면 언제나 갈등을 0개로 분리할 수 있다.
-산출물: <out-dir>/students.csv, peer_evaluations.csv, meta.json
+갈등쌍은 '매칭'(각자 최대 1쌍)으로 주입 → 팀 2개 이상이면 항상 분리 가능.
+고이슈(≥2) 인원은 팀 수 이하로 두어 서로 다른 팀에 배치 가능.
+실행: python data/make_sample.py            (기본 23명)
+      python data/make_sample.py --n 60
 """
 
 import argparse
@@ -19,130 +17,126 @@ import json
 import os
 import random
 
+DISPS = ["작업자", "매니저", "분위기메이커", "책임자", "연구자", "서포터"]
 MBTIS = ["ENFP", "INTJ", "ISTJ", "ESFJ", "INFP", "ENTP", "ISFP", "ESTJ",
          "INFJ", "ENTJ", "ISFJ", "ESTP", "ENFJ", "INTP", "ESFP", "ISTP"]
-ROLES = ["리더", "서포터", "분위기메이커", "연구자"]
-PERSONA = {
-    "리더": "주도적이고 추진력 있음. 의견을 잘 모음.",
-    "서포터": "성실하고 협조적. 팀을 안정적으로 받쳐줌.",
-    "분위기메이커": "친화력이 좋고 팀 분위기를 띄움.",
-    "연구자": "분석적이고 깊게 파고듦. 자료조사에 강함.",
-}
+NEG_NOTES = ["소통이 잘 되지 않음", "작업 방식에서 마찰", "역할 분배로 불만", "협업 태도 아쉬움"]
+POS_NOTES = ["함께하고 싶은 팀원 (추진력)", "소통이 잘 됨", "작업 합이 좋음"]
+ISSUE_NOTES = ["극도의 수동형", "불안형 / 에고 강함", "소통 부족 / 역량 미진", "GPT 의존도 높음"]
 
 
-def generate(n, seed=7, prev_size=6):
+def generate(n, seed=7):
     rng = random.Random(seed)
-
-    # 이전 팀(prev_team) 구성: 6인씩 묶고 마지막 팀은 나머지.
     students = []
-    id_by_prev = {}
     for i in range(n):
-        sidx = f"S{i + 1:02d}"
-        tname = chr(ord("A") + (i // prev_size))
-        role = rng.choice(ROLES)
-        sec = rng.choice([r for r in ROLES if r != role])
+        role = rng.choice(DISPS)
+        sec = rng.choice([d for d in DISPS if d != role])
         students.append({
-            "id": sidx,
+            "id": f"S{i + 1:02d}",
             "name": f"수강생{i + 1:02d}",
+            "overall": round(rng.uniform(5.0, 11.0), 1),
+            "leadership": rng.randint(1, 3),
+            "management": rng.randint(1, 3),
+            "planning": rng.randint(1, 5),
+            "execution": rng.randint(1, 5),
+            "communication": rng.randint(1, 5),
+            "primary_disp": role,
+            "secondary_disp": sec,
             "mbti": rng.choice(MBTIS),
-            "personality_summary": PERSONA[role],
-            "instructor_score": round(rng.uniform(2.8, 4.8), 1),
-            "primary_role": role,
-            "secondary_role": sec,
-            "prev_team": tname,
+            "issue_level": 0,
+            "issue_note": "",
         })
-        id_by_prev.setdefault(tname, []).append(sidx)
 
-    # 갈등/긍정 쌍 주입 — 같은 이전 팀 안에서, 갈등은 매칭으로.
+    # 고이슈 주입 (팀 수보다 적게 → 분산 가능). 대략 n//8명.
+    n_high = max(1, n // 8)
+    hi_idx = rng.sample(range(n), n_high)
+    for i in hi_idx:
+        students[i]["issue_level"] = rng.choice([2, 3])
+        students[i]["issue_note"] = rng.choice(ISSUE_NOTES)
+
+    names = [s["name"] for s in students]
+
+    # 갈등쌍(매칭) + 긍정쌍 주입
+    pool = list(range(n))
+    rng.shuffle(pool)
     conflict_pairs, positive_pairs = [], []
-    used_in_conflict = set()
-    n_conflict_target = max(1, n // 12)
-    n_positive_target = max(2, n // 6)
-
-    for tname, ids in id_by_prev.items():
-        if len(ids) < 2:
+    used = set()
+    n_conf = max(1, n // 10)
+    it = iter(pool)
+    for a in it:
+        if len(conflict_pairs) >= n_conf:
+            break
+        if a in used:
             continue
-        # 갈등: 팀당 최대 1쌍, 전역 매칭 유지
-        if len(conflict_pairs) < n_conflict_target:
-            cand = [x for x in ids if x not in used_in_conflict]
-            if len(cand) >= 2:
-                a, b = rng.sample(cand, 2)
-                conflict_pairs.append(tuple(sorted((a, b))))
-                used_in_conflict.update((a, b))
-        # 긍정: 팀당 1쌍 정도
-        if len(positive_pairs) < n_positive_target and len(ids) >= 2:
-            a, b = rng.sample(ids, 2)
-            key = tuple(sorted((a, b)))
-            if key not in conflict_pairs:
-                positive_pairs.append(key)
+        b = next((x for x in pool if x != a and x not in used), None)
+        if b is None:
+            break
+        used.update((a, b))
+        conflict_pairs.append((a, b))
+    # 긍정쌍
+    for _ in range(max(2, n // 6)):
+        a, b = rng.sample(range(n), 2)
+        if (a, b) not in conflict_pairs and (b, a) not in conflict_pairs:
+            positive_pairs.append((a, b))
 
-    conflict_set = set(conflict_pairs)
-    positive_set = set(positive_pairs)
+    relations = []
 
-    def directed(a, b):
-        key = tuple(sorted((a, b)))
-        if key in conflict_set:
-            return (rng.choice([1, 2]), rng.choice([1, 2]),
-                    rng.choice([1, 2]), 1)
-        if key in positive_set:
-            return (5, rng.choice([4, 5]), 5, 5)
-        base = rng.choice([3, 3, 4, 4, 5])
+    def rel(a, b, typ, w, note):
+        relations.append({"DATE": "2026-07-09", "FROM": names[a], "TO": names[b],
+                          "TYPE": typ, "W": w, "NOTE": note})
 
-        def jit():
-            return max(1, min(5, base + rng.choice([-1, 0, 0, 1])))
-        return (jit(), jit(), jit(), rng.choice([3, 4, 4, 5]))
-
-    evals = []
-    for ids in id_by_prev.values():
-        for a in ids:
-            for b in ids:
-                if a == b:
-                    continue
-                col, con, com, ag = directed(a, b)
-                evals.append({
-                    "rater_id": a, "ratee_id": b,
-                    "collaboration": col, "contribution": con,
-                    "communication": com, "again": ag, "comment": "",
-                })
+    for a, b in conflict_pairs:
+        rel(a, b, "NEG", rng.choice([2, 3]), rng.choice(NEG_NOTES))
+        rel(b, a, "NEG", rng.choice([2, 3]), rng.choice(NEG_NOTES))
+    for a, b in positive_pairs:
+        rel(a, b, "POS", rng.choice([2, 3]), rng.choice(POS_NOTES))
+        if rng.random() < 0.6:
+            rel(b, a, "POS", rng.choice([1, 2, 3]), rng.choice(POS_NOTES))
+    # 약한 노이즈 관계 몇 개(순수 긍정 위주)
+    for _ in range(n // 3):
+        a, b = rng.sample(range(n), 2)
+        if a != b:
+            rel(a, b, "POS", 1, "")
 
     meta = {
-        "n": n,
-        "seed": seed,
-        "prev_size": prev_size,
-        "conflict_pairs": ["|".join(p) for p in conflict_pairs],
-        "positive_pairs": ["|".join(p) for p in positive_pairs],
+        "n": n, "seed": seed,
+        "conflict_pairs": [f"{names[a]}|{names[b]}" for a, b in conflict_pairs],
+        "positive_pairs": [f"{names[a]}|{names[b]}" for a, b in positive_pairs],
+        "high_issue": [names[i] for i in hi_idx],
     }
-    return students, evals, meta
+    return students, relations, meta
 
 
-def write(out_dir, students, evals, meta):
+def write(out_dir, students, relations, meta):
     os.makedirs(out_dir, exist_ok=True)
+    scols = ["id", "name", "overall", "leadership", "management", "planning",
+             "execution", "communication", "primary_disp", "secondary_disp",
+             "mbti", "issue_level", "issue_note"]
     with open(os.path.join(out_dir, "students.csv"), "w", newline="",
               encoding="utf-8-sig") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(students[0].keys()))
+        w = csv.DictWriter(fh, fieldnames=scols)
         w.writeheader()
         w.writerows(students)
-    with open(os.path.join(out_dir, "peer_evaluations.csv"), "w", newline="",
+    with open(os.path.join(out_dir, "relations.csv"), "w", newline="",
               encoding="utf-8-sig") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(evals[0].keys()))
+        w = csv.DictWriter(fh, fieldnames=["DATE", "FROM", "TO", "TYPE", "W", "NOTE"])
         w.writeheader()
-        w.writerows(evals)
+        w.writerows(relations)
     with open(os.path.join(out_dir, "meta.json"), "w", encoding="utf-8") as fh:
         json.dump(meta, fh, ensure_ascii=False, indent=2)
 
 
 def main():
-    p = argparse.ArgumentParser(description="샘플 데이터 생성기")
-    p.add_argument("--n", type=int, default=23, help="수강생 수 (기본 23)")
+    p = argparse.ArgumentParser()
+    p.add_argument("--n", type=int, default=23)
     p.add_argument("--seed", type=int, default=7)
-    p.add_argument("--prev-size", type=int, default=6, help="이전 팀 크기")
-    p.add_argument("--out-dir", default=os.path.join(
-        os.path.dirname(__file__), "sample"))
+    p.add_argument("--out-dir", default=os.path.join(os.path.dirname(__file__), "sample"))
     a = p.parse_args()
-    students, evals, meta = generate(a.n, a.seed, a.prev_size)
-    write(a.out_dir, students, evals, meta)
-    print(f"생성 완료: {len(students)}명, 평가 {len(evals)}건 "
-          f"(갈등 {len(meta['conflict_pairs'])} · 긍정 {len(meta['positive_pairs'])})")
+    students, relations, meta = generate(a.n, a.seed)
+    write(a.out_dir, students, relations, meta)
+    print(f"생성 완료: {len(students)}명, 관계 {len(relations)}건 "
+          f"(갈등 {len(meta['conflict_pairs'])} · 긍정 {len(meta['positive_pairs'])} "
+          f"· 고이슈 {len(meta['high_issue'])})")
     print(f"  -> {a.out_dir}")
 
 
