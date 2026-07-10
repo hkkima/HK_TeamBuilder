@@ -64,7 +64,6 @@ def load_students(path: str) -> list[Student]:
             students.append(Student(
                 id=sid,
                 name=name,
-                overall=_f(row, "overall", "종합역량", "종합 역량", "종합"),
                 leadership=_f(row, "leadership", "리더십"),
                 management=_f(row, "management", "관리능력", "관리 능력", "관리"),
                 planning=_f(row, "planning", "기획역량", "기획 역량", "기획"),

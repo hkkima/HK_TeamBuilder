@@ -1,7 +1,7 @@
 """핵심 데이터 모델 (v2 — 최종 트래킹 폼 기준).
 
-수강생 마스터: 종합역량 + 역량 5차원(리더십·관리·기획·작업·소통) + 성향 6종(주/부)
-               + MBTI + 이슈 강도/비고 (+ 단원별 점수).
+수강생 마스터: 역량 5차원(리더십·관리·기획·작업·소통) + 성향 6종(주/부)
+               + MBTI + 이슈 강도/비고 + 단원별 점수(역량 평준화용, 보조).
 관계: 방향성 있는 POS/NEG 평가 + 가중치 W(1~3) + 노트.
 """
 
@@ -58,7 +58,6 @@ class Student:
 
     id: str
     name: str
-    overall: Optional[float] = None        # 종합 역량
     leadership: Optional[float] = None      # 리더십 (1~3)
     management: Optional[float] = None      # 관리 능력 (1~3)
     planning: Optional[float] = None        # 기획 역량 (1~5)
@@ -77,9 +76,7 @@ class Student:
         return self.mbti[axis_index].upper()
 
     def comp_value(self) -> Optional[float]:
-        """평준화에 쓸 단일 역량 값: 종합역량 우선, 없으면 단원별 평균."""
-        if self.overall is not None:
-            return self.overall
+        """평준화에 쓸 단일 역량 값 = 단원별 평가 점수 평균 (없으면 None)."""
         if self.units:
             vals = [v for v in self.units.values() if v is not None]
             if vals:

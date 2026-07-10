@@ -2,7 +2,7 @@
 """재현 가능한 샘플 데이터 생성기 (v2 — 최종 트래킹 폼 기준).
 
 산출: <out-dir>/students.csv, relations.csv, meta.json
-  - students: 종합역량 + 역량5차원 + 성향(주/부) + MBTI + 이슈강도/비고
+  - students: 역량5차원 + 성향(주/부) + MBTI + 이슈강도/비고 + 단원별 점수
   - relations: FROM,TO,TYPE(POS/NEG),W,NOTE,DATE (이름으로 참조)
 
 갈등쌍은 '매칭'(각자 최대 1쌍)으로 주입 → 팀 2개 이상이면 항상 분리 가능.
@@ -34,7 +34,6 @@ def generate(n, seed=7):
         students.append({
             "id": f"S{i + 1:02d}",
             "name": f"수강생{i + 1:02d}",
-            "overall": round(rng.uniform(5.0, 11.0), 1),
             "leadership": rng.randint(1, 3),
             "management": rng.randint(1, 3),
             "planning": rng.randint(1, 5),
@@ -45,6 +44,9 @@ def generate(n, seed=7):
             "mbti": rng.choice(MBTIS),
             "issue_level": 0,
             "issue_note": "",
+            "단원1": rng.randint(1, 5),
+            "단원2": rng.randint(1, 5),
+            "단원3": rng.randint(1, 5),
         })
 
     # 고이슈 주입 (팀 수보다 적게 → 분산 가능). 대략 n//8명.
@@ -109,9 +111,9 @@ def generate(n, seed=7):
 
 def write(out_dir, students, relations, meta):
     os.makedirs(out_dir, exist_ok=True)
-    scols = ["id", "name", "overall", "leadership", "management", "planning",
+    scols = ["id", "name", "leadership", "management", "planning",
              "execution", "communication", "primary_disp", "secondary_disp",
-             "mbti", "issue_level", "issue_note"]
+             "mbti", "issue_level", "issue_note", "단원1", "단원2", "단원3"]
     with open(os.path.join(out_dir, "students.csv"), "w", newline="",
               encoding="utf-8-sig") as fh:
         w = csv.DictWriter(fh, fieldnames=scols)

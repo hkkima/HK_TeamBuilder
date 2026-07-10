@@ -66,7 +66,6 @@
       unitCols.forEach((c) => { const v = pickNum(row, [c]); if (v != null) units[c] = v; });
       students.push({
         id, name,
-        overall: pickNum(row, ["overall", "종합역량", "종합 역량", "종합"]),
         leadership: pickNum(row, ["leadership", "리더십"]),
         management: pickNum(row, ["management", "관리능력", "관리 능력", "관리"]),
         planning: pickNum(row, ["planning", "기획역량", "기획 역량", "기획"]),
@@ -147,7 +146,6 @@
 
   // ---- 학생 헬퍼 ----
   const compValue = (m) => {
-    if (m.overall != null) return m.overall;
     const vs = Object.values(m.units || {}).filter((v) => v != null);
     return vs.length ? vs.reduce((s, x) => s + x, 0) / vs.length : null;
   };

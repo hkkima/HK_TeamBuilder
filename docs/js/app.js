@@ -14,10 +14,10 @@
   };
 
   const STUDENTS_TEMPLATE =
-    "id,name,overall,leadership,management,planning,execution,communication," +
-    "primary_disp,secondary_disp,mbti,issue_level,issue_note\n" +
-    "S01,김규장,7.3,1,2,4,4,2,작업자,연구자,INTP,1,타인 비교가 잦음 / 불안형\n" +
-    "S02,김민성,8.3,2,3,2,4,3,매니저,연구자,ESTJ,,\n";
+    "id,name,leadership,management,planning,execution,communication," +
+    "primary_disp,secondary_disp,mbti,issue_level,issue_note,단원1,단원2,단원3\n" +
+    "S01,김규장,1,2,4,4,2,작업자,연구자,INTP,1,타인 비교가 잦음 / 불안형,3,4,3\n" +
+    "S02,김민성,2,3,2,4,3,매니저,연구자,ESTJ,,,4,4,5\n";
   const RELATIONS_TEMPLATE =
     "DATE,FROM,TO,TYPE,W,NOTE\n" +
     "2026-06-10,김규장,이제희,NEG,3,소통이 전혀 되지 않음\n" +
@@ -414,15 +414,16 @@
   function exportCsv() {
     if (!state.compositions.length) { setStatus("내보낼 조합이 없습니다. 먼저 저장하세요.", "bad"); return; }
     let csv = "﻿composition,team,team_leader,team_note,id,name,mbti,primary_disp,secondary_disp," +
-      "overall,leadership,issue_level,issue_note,leader_candidate\n";
+      "comp_avg,leadership,issue_level,issue_note,leader_candidate\n";
     state.compositions.forEach((c) => {
       const notes = c.notes || c.teams.map(() => "");
       const leaders = c.leaderByTeam || c.teams.map(() => null);
       c.teams.forEach((ids, ti) => {
         studentsOf(ids).forEach((m) => {
+          const cv = TB.compValue(m);
           const cells = [c.name, ti + 1, leaders[ti] === m.id ? "Y" : "", notes[ti] || "",
             m.id, m.name, m.mbti, m.primary_disp || "", m.secondary_disp || "",
-            m.overall == null ? "" : m.overall, m.leadership == null ? "" : m.leadership,
+            cv == null ? "" : cv.toFixed(2), m.leadership == null ? "" : m.leadership,
             m.issue_level || 0, m.issue_note || "", TB.leaderCandidate(m) ? "Y" : ""];
           csv += cells.map((v) => { const s = String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(",") + "\n";
         });

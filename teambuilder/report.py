@@ -105,15 +105,16 @@ def write_csv(path: str, recs) -> None:
         w = csv.writer(fh)
         w.writerow(["option", "team", "id", "name", "mbti",
                     "primary_disp", "secondary_disp", "leadership",
-                    "overall", "issue_level", "issue_note", "leader_candidate"])
+                    "comp_avg", "issue_level", "issue_note", "leader_candidate"])
         for oi, rec in enumerate(recs, start=1):
             for team in rec.teams:
                 for m in team.members:
+                    cv = m.comp_value()
                     w.writerow([
                         oi, team.index + 1, m.id, m.name, m.mbti,
                         m.primary_disp or "", m.secondary_disp or "",
                         "" if m.leadership is None else m.leadership,
-                        "" if m.overall is None else m.overall,
+                        "" if cv is None else round(cv, 2),
                         m.issue_level, m.issue_note,
                         "Y" if m.is_leader_candidate() else "",
                     ])
