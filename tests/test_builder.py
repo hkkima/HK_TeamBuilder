@@ -85,6 +85,31 @@ def test_name_resolution():
     print("ok: 관계 이름 참조 해석")
 
 
+def test_pins():
+    students, graph, _ = _load()
+    ids = [s.id for s in students]
+    # ids[0]→팀0, ids[1]→팀2 고정
+    pins = {ids[0]: 0, ids[1]: 2}
+    recs = build_recommendations(students, graph, teams=4, pins=pins,
+                                 n_options=1, restarts=40)
+    top = recs[0]
+    assert _team_of(top, ids[0]) == 0, "핀 미준수"
+    assert _team_of(top, ids[1]) == 2, "핀 미준수"
+    # 저장 teams와 점수 일치 (회귀 방지)
+    from teambuilder.scoring import score_partition
+    teams = [[m for m in t.members] for t in top.teams]
+    resc = score_partition(teams, graph, __import__("teambuilder.scoring",
+                           fromlist=["Weights"]).Weights())
+    assert abs(resc.total - top.score.total) < 1e-6, (resc.total, top.score.total)
+    # 모순 핀: 팀 인덱스 범위 초과 → 예외
+    try:
+        build_recommendations(students, graph, teams=4, pins={ids[0]: 9}, restarts=3)
+        assert False
+    except ValueError:
+        pass
+    print("ok: 핀 고정 + 점수 일치 + 범위 예외")
+
+
 def test_options_distinct():
     students, graph, _ = _load()
     recs = build_recommendations(students, graph, teams=4, n_options=3, restarts=40)
@@ -99,5 +124,6 @@ if __name__ == "__main__":
     test_issue_and_leader()
     test_forced_constraints()
     test_name_resolution()
+    test_pins()
     test_options_distinct()
     print("\n전체 통과 ✅")

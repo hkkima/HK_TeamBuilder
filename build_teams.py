@@ -24,6 +24,7 @@ def parse_args(argv):
     p.add_argument("--students", required=True)
     p.add_argument("--relations", help="관계 평가 CSV (from,to,type=POS/NEG,weight,note)")
     p.add_argument("--constraints", help="강제 제약 CSV (id_a,id_b,type=together|apart)")
+    p.add_argument("--pins", help="핀 고정 (예: S01:0,S02:2 — 학생을 팀인덱스에 고정)")
 
     grp = p.add_mutually_exclusive_group(required=True)
     grp.add_argument("--teams", type=int)
@@ -80,10 +81,17 @@ def main(argv):
     graph = build_relationship_graph(students, relations, max_weight=a.max_weight)
 
     sizes = [int(x) for x in a.sizes.split(",") if x.strip()] if a.sizes else None
+    pins = {}
+    if a.pins:
+        for tok in a.pins.split(","):
+            if ":" in tok:
+                pid, ti = tok.split(":", 1)
+                pins[pid.strip()] = int(ti)
     recs = build_recommendations(
         students, graph, teams=a.teams, sizes=sizes,
         weights=build_weights(a),
         force_together=force_together, force_separate=force_separate,
+        pins=pins,
         n_options=a.options, restarts=a.restarts, seed=a.seed,
     )
     report = render_report(recs, graph, n_students=len(students))

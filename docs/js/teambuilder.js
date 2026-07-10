@@ -262,7 +262,8 @@
     const g = new Map(); ids.forEach((_, i) => { const r = find(i); if (!g.has(r)) g.set(r, []); g.get(r).push(i); });
     return Array.from(g.values());
   }
-  function validateConstraints(students, sizes, forceTogether, forceSeparate) {
+  function validateConstraints(students, sizes, forceTogether, forceSeparate, pins) {
+    pins = pins || {};
     const ids = students.map((s) => s.id), idSet = new Set(ids);
     [forceTogether, forceSeparate].forEach((set) => set.forEach((k) => { const [a, b] = k.split("|"); if (!idSet.has(a) || !idSet.has(b)) throw new Error(`제약에 없는 학생 id: ${a}, ${b}`); }));
     const groups = buildGroups(ids, forceTogether), idx = new Map(ids.map((id, i) => [id, i])), mg = new Map();
@@ -270,13 +271,31 @@
     const maxTeam = Math.max(...sizes);
     for (const g of groups) if (g.length > maxTeam) throw new Error(`강제 결합 그룹 크기(${g.length})가 최대 팀 크기(${maxTeam}) 초과: ` + g.map((i) => ids[i]).join(", "));
     forceSeparate.forEach((k) => { const [a, b] = k.split("|"); if (mg.get(idx.get(a)) === mg.get(idx.get(b))) throw new Error(`${a}, ${b}는 강제 결합으로 묶여 분리 불가(모순).`); });
+    // 핀 검증
+    const nTeams = sizes.length, perTeam = new Array(nTeams).fill(0), groupPin = new Map();
+    Object.keys(pins).forEach((pid) => {
+      const t = pins[pid];
+      if (!idSet.has(pid)) throw new Error(`핀에 없는 학생 id: ${pid}`);
+      if (!Number.isInteger(t) || t < 0 || t >= nTeams) throw new Error(`핀 팀 인덱스 범위 오류: ${pid}→${t}`);
+      perTeam[t]++;
+      const gi = mg.get(idx.get(pid));
+      if (groupPin.has(gi) && groupPin.get(gi) !== t) throw new Error(`강제 결합 그룹이 서로 다른 팀에 핀됨(모순): ${pid}`);
+      groupPin.set(gi, t);
+    });
+    for (let t = 0; t < nTeams; t++) if (perTeam[t] > sizes[t]) throw new Error(`팀 ${t + 1}에 핀 ${perTeam[t]}명 > 정원 ${sizes[t]}`);
+    forceSeparate.forEach((k) => { const [a, b] = k.split("|"); if (pins[a] != null && pins[b] != null && pins[a] === pins[b]) throw new Error(`${a}, ${b}는 분리 대상인데 같은 팀에 핀됨(모순).`); });
     return groups;
   }
-  function seedAssignment(students, sizes, groups, forceSeparate, rng) {
+  function seedAssignment(students, sizes, groups, forceSeparate, rng, pins) {
+    pins = pins || {};
     const ids = students.map((s) => s.id), nTeams = sizes.length, remaining = sizes.slice();
     const assign = new Array(students.length).fill(-1), inTeam = Array.from({ length: nTeams }, () => new Set()), sep = new Map();
     forceSeparate.forEach((k) => { const [a, b] = k.split("|"); if (!sep.has(a)) sep.set(a, new Set()); if (!sep.has(b)) sep.set(b, new Set()); sep.get(a).add(b); sep.get(b).add(a); });
-    const order = groups.map((_, gi) => gi).sort((x, y) => (groups[y].length - groups[x].length) || (rng() - 0.5));
+    const groupPin = new Map();
+    groups.forEach((grp, gi) => { for (const i of grp) if (pins[ids[i]] != null) { groupPin.set(gi, pins[ids[i]]); break; } });
+    const place = (gi, t) => { const grp = groups[gi]; if (remaining[t] < grp.length) return false; grp.forEach((i) => { assign[i] = t; inTeam[t].add(ids[i]); }); remaining[t] -= grp.length; return true; };
+    for (const [gi, t] of groupPin) if (!place(gi, t)) return null;
+    const order = groups.map((_, gi) => gi).filter((gi) => !groupPin.has(gi)).sort((x, y) => (groups[y].length - groups[x].length) || (rng() - 0.5));
     for (const gi of order) {
       const grp = groups[gi], size = grp.length, gids = grp.map((i) => ids[i]);
       let cand = []; for (let t = 0; t < nTeams; t++) if (remaining[t] >= size) cand.push(t);
@@ -287,16 +306,17 @@
     }
     return assign;
   }
-  function localSearch(students, assign, sizes, graph, w, rng, maxIter, fT, fS) {
+  function localSearch(students, assign, sizes, graph, w, rng, maxIter, fT, fS, pinned) {
+    pinned = pinned || new Set();
     const nTeams = sizes.length, n = students.length;
     const score = (a) => scorePartition(partitionFrom(students, a, nTeams), graph, w, fT, fS);
     let best = score(assign);
     for (let it = 0; it < maxIter; it++) {
       let improved = false; const order = shuffle(Array.from({ length: n }, (_, i) => i), rng);
       for (let ii = 0; ii < n && !improved; ii++) {
-        const i = order[ii];
+        const i = order[ii]; if (pinned.has(i)) continue;
         for (let jj = ii + 1; jj < n; jj++) {
-          const j = order[jj]; if (assign[i] === assign[j]) continue;
+          const j = order[jj]; if (pinned.has(j) || assign[i] === assign[j]) continue;
           [assign[i], assign[j]] = [assign[j], assign[i]];
           const cand = score(assign);
           if (cand.total > best.total + 1e-9) { best = cand; improved = true; break; }
@@ -315,12 +335,15 @@
     const restarts = opt.restarts != null ? opt.restarts : 60, maxIter = opt.maxIter != null ? opt.maxIter : 40, nOptions = opt.nOptions != null ? opt.nOptions : 3;
     const fT = opt.forceTogether instanceof Set ? opt.forceTogether : pairsToSet(opt.forceTogether);
     const fS = opt.forceSeparate instanceof Set ? opt.forceSeparate : pairsToSet(opt.forceSeparate);
-    const groups = validateConstraints(students, sizes, fT, fS);
+    const pins = opt.pins || {};
+    const groups = validateConstraints(students, sizes, fT, fS, pins);
+    const idxMap = new Map(students.map((s, i) => [s.id, i]));
+    const pinnedIdx = new Set(Object.keys(pins).map((pid) => idxMap.get(pid)));
     const found = new Map();
     for (let r = 0; r < restarts; r++) {
-      const assign = seedAssignment(students, sizes, groups, fS, rng);
-      if (assign === null) throw new Error("강제 제약을 만족하는 초기 배치를 찾지 못했습니다.");
-      const sb = localSearch(students, assign, sizes, graph, w, rng, maxIter, fT, fS);
+      const assign = seedAssignment(students, sizes, groups, fS, rng, pins);
+      if (assign === null) throw new Error("강제 제약/핀을 만족하는 초기 배치를 찾지 못했습니다.");
+      const sb = localSearch(students, assign, sizes, graph, w, rng, maxIter, fT, fS, pinnedIdx);
       const partition = partitionFrom(students, assign, nTeams), sig = signature(partition);
       if (!found.has(sig) || sb.total > found.get(sig).score.total) found.set(sig, { teams: partition, score: sb, signature: sig });
     }

@@ -5,6 +5,9 @@
 (function () {
   "use strict";
 
+  // 로그인 게이트 on/off. false면 게이트 없이 바로 워크스페이스 진입.
+  const ENABLE_AUTH = true;
+
   // 자격증명 설정: salt + "\n" + id + "\n" + pw 의 SHA-256(hex).
   // 변경하려면 setup.html 에서 새 해시를 생성해 아래 값을 교체하세요.
   const SALT = "hk_teambuilder_v1";
@@ -22,6 +25,7 @@
     document.getElementById("login-screen").style.display = "none";
     document.getElementById("app").style.display = "block";
     document.body.classList.add("authed");
+    const lo = document.getElementById("btn-logout"); if (lo) lo.style.display = ENABLE_AUTH ? "" : "none";
     if (window.AppInit && !window.__appInited) { window.__appInited = true; window.AppInit(); }
   }
 
@@ -31,6 +35,8 @@
   }
 
   document.addEventListener("DOMContentLoaded", function () {
+    if (!ENABLE_AUTH) { reveal(); return; }
+    document.getElementById("login-screen").style.display = "";
     // 세션 동안 재로그인 생략
     if (sessionStorage.getItem(SESSION_KEY) === "1") { reveal(); return; }
 

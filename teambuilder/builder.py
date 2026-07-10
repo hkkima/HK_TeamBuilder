@@ -80,11 +80,14 @@ def validate_constraints(
     sizes: list[int],
     force_together: set[tuple[str, str]],
     force_separate: set[tuple[str, str]],
+    pins: Optional[dict[str, int]] = None,
 ) -> list[list[int]]:
     """강제 제약의 실현 가능성을 검증하고 결합 그룹을 반환.
 
     모순/불가능하면 ValueError로 사람이 읽을 메시지를 던진다.
+    pins: {학생id: 팀인덱스} — 특정 팀에 고정.
     """
+    pins = pins or {}
     ids = [s.id for s in students]
     id_set = set(ids)
     for grp in (force_together, force_separate):
@@ -112,6 +115,28 @@ def validate_constraints(
         if member_group[idx[a]] == member_group[idx[b]]:
             raise ValueError(
                 f"{a}, {b}는 강제 결합으로 묶여 있어 분리할 수 없습니다(모순).")
+
+    # ---- 핀 검증 ----
+    n_teams = len(sizes)
+    per_team = [0] * n_teams
+    group_pin: dict[int, int] = {}
+    for pid, t in pins.items():
+        if pid not in id_set:
+            raise ValueError(f"핀에 없는 학생 id: {pid}")
+        if not isinstance(t, int) or t < 0 or t >= n_teams:
+            raise ValueError(f"핀 팀 인덱스 범위 오류: {pid}→{t} (팀 {n_teams}개)")
+        per_team[t] += 1
+        gi = member_group[idx[pid]]
+        if gi in group_pin and group_pin[gi] != t:
+            raise ValueError(f"강제 결합 그룹이 서로 다른 팀에 핀됨(모순): {pid}")
+        group_pin[gi] = t
+    for t in range(n_teams):
+        if per_team[t] > sizes[t]:
+            raise ValueError(f"팀 {t + 1}에 핀 {per_team[t]}명 > 정원 {sizes[t]}")
+    # 강제 분리 쌍이 같은 팀에 핀되면 모순
+    for a, b in force_separate:
+        if a in pins and b in pins and pins[a] == pins[b]:
+            raise ValueError(f"{a}, {b}는 분리 대상인데 같은 팀에 핀됨(모순).")
     return groups
 
 
@@ -121,12 +146,14 @@ def _seed_assignment(
     groups: list[list[int]],
     force_separate: set[tuple[str, str]],
     rng: random.Random,
+    pins: Optional[dict[str, int]] = None,
 ) -> Optional[list[int]]:
     """제약을 존중하는 초기 배정.
 
-    결합 그룹을 큰 것부터 용량이 남는 팀에 배치(분리 위반이 적은 팀 우선).
-    배치 불가하면 None.
+    핀된 학생이 속한 그룹은 지정 팀에 먼저 배치, 나머지는 큰 그룹부터
+    용량이 남는 팀에(분리 위반이 적은 팀 우선). 배치 불가하면 None.
     """
+    pins = pins or {}
     ids = [s.id for s in students]
     n_teams = len(sizes)
     remaining = list(sizes)
@@ -137,8 +164,31 @@ def _seed_assignment(
         sep_partners.setdefault(a, set()).add(b)
         sep_partners.setdefault(b, set()).add(a)
 
-    # 큰 그룹부터, 동률은 무작위로
-    order = sorted(range(len(groups)),
+    # 그룹별 고정 팀(핀에서 유도)
+    group_pin: dict[int, int] = {}
+    for gi, grp in enumerate(groups):
+        for i in grp:
+            if ids[i] in pins:
+                group_pin[gi] = pins[ids[i]]
+                break
+
+    def place(gi: int, t: int) -> bool:
+        grp = groups[gi]
+        if remaining[t] < len(grp):
+            return False
+        for i in grp:
+            assign[i] = t
+            members_in_team[t].add(ids[i])
+        remaining[t] -= len(grp)
+        return True
+
+    # 1) 핀 고정 그룹 먼저 배치
+    for gi, t in group_pin.items():
+        if not place(gi, t):
+            return None
+
+    # 2) 나머지: 큰 그룹부터, 동률은 무작위로
+    order = sorted((gi for gi in range(len(groups)) if gi not in group_pin),
                    key=lambda gi: (-len(groups[gi]), rng.random()))
     for gi in order:
         grp = groups[gi]
@@ -189,8 +239,13 @@ def _local_search(
     max_iter: int,
     force_together: set[tuple[str, str]],
     force_separate: set[tuple[str, str]],
+    pinned: Optional[set[int]] = None,
 ) -> tuple[list[int], ScoreBreakdown]:
-    """두 학생의 팀을 맞교환하며 점수를 개선하는 first-improvement 지역탐색."""
+    """두 학생의 팀을 맞교환하며 점수를 개선하는 first-improvement 지역탐색.
+
+    pinned: 고정된 학생 인덱스 집합(스왑에서 제외).
+    """
+    pinned = pinned or set()
     n_teams = len(sizes)
 
     def score(a):
@@ -207,9 +262,11 @@ def _local_search(
         rng.shuffle(order)
         for ii in range(n):
             i = order[ii]
+            if i in pinned:
+                continue
             for jj in range(ii + 1, n):
                 j = order[jj]
-                if assign[i] == assign[j]:
+                if j in pinned or assign[i] == assign[j]:
                     continue
                 assign[i], assign[j] = assign[j], assign[i]
                 cand = score(assign)
@@ -234,32 +291,39 @@ def build_recommendations(
     weights: Weights | None = None,
     force_together: Optional[set[tuple[str, str]]] = None,
     force_separate: Optional[set[tuple[str, str]]] = None,
+    pins: Optional[dict[str, int]] = None,
     n_options: int = 3,
     restarts: int = 60,
     max_iter: int = 40,
     seed: int = 42,
 ) -> list[Recommendation]:
-    """서로 다른 상위 추천안 n_options개를 생성."""
+    """서로 다른 상위 추천안 n_options개를 생성.
+
+    pins: {학생id: 팀인덱스} — 지정 학생을 해당 팀에 고정(부분 재편성).
+    """
     weights = weights or Weights()
     force_together = force_together or set()
     force_separate = force_separate or set()
+    pins = pins or {}
     size_list = sizes_for(len(students), teams=teams, sizes=sizes)
     n_teams = len(size_list)
     rng = random.Random(seed)
 
     groups = validate_constraints(students, size_list,
-                                  force_together, force_separate)
+                                  force_together, force_separate, pins)
+    idx = {s.id: i for i, s in enumerate(students)}
+    pinned_idx = {idx[pid] for pid in pins}
 
     found: dict[tuple, Recommendation] = {}
     for _ in range(restarts):
         assign = _seed_assignment(students, size_list, groups,
-                                  force_separate, rng)
+                                  force_separate, rng, pins)
         if assign is None:
-            raise ValueError("강제 제약을 만족하는 초기 배치를 찾지 못했습니다. "
+            raise ValueError("강제 제약/핀을 만족하는 초기 배치를 찾지 못했습니다. "
                              "팀 크기나 제약을 조정하세요.")
         assign, sb = _local_search(
             students, assign, size_list, graph, weights, rng, max_iter,
-            force_together, force_separate)
+            force_together, force_separate, pinned_idx)
         partition = _partition_from_assignment(students, assign, n_teams)
         sig = _signature(partition)
         team_objs = [Team(index=i, members=partition[i]) for i in range(n_teams)]

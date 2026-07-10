@@ -4,163 +4,67 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex, nofollow" />
-  <title>수강생 팀빌더 · 운영진 전용</title>
+  <title>팀빌딩 스튜디오 · 운영진 전용</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🧩</text></svg>" />
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
-  <!-- 로그인 게이트 -->
-  <div id="login-screen">
+  <!-- 로그인 게이트 (ENABLE_AUTH=false 면 자동 통과) -->
+  <div id="login-screen" style="display:none">
     <form id="login-form" class="login-card" autocomplete="off">
-      <h1>🧩 수강생 팀빌더</h1>
+      <h1>🧩 팀빌딩 스튜디오</h1>
       <p class="sub">운영진 전용 · 공유 ID/PW가 필요합니다</p>
       <label>ID<input id="login-id" type="text" autocomplete="username" required /></label>
       <label>비밀번호<input id="login-pw" type="password" autocomplete="current-password" required /></label>
       <button type="submit">로그인</button>
       <div id="login-error" class="error"></div>
-      <p class="hint">※ 정적 페이지 보호는 난독화 수준입니다. 데이터는 브라우저에서만 처리됩니다.</p>
+      <p class="hint">※ 정적 페이지 보호는 난독화 수준입니다. 데이터는 브라우저에서만 처리·저장됩니다.</p>
     </form>
   </div>
 
-  <!-- 앱 본체 -->
   <div id="app" style="display:none">
     <header class="topbar">
-      <div class="brand">🧩 수강생 팀빌더 <span class="badge">운영진</span></div>
-      <button class="ghost" onclick="HKLogout()">로그아웃</button>
+      <div class="brand">🧩 <b>팀빌딩 스튜디오</b></div>
+      <div class="proj">
+        <select id="project-select" title="프로젝트"></select>
+        <button id="btn-new-proj" class="icon" title="새 프로젝트">＋</button>
+        <button id="btn-rename-proj" class="icon" title="이름 변경">✎</button>
+        <button id="btn-del-proj" class="icon" title="삭제">🗑</button>
+      </div>
+      <nav class="tabs">
+        <button class="tab" data-tab="data">① 데이터</button>
+        <button class="tab" data-tab="board">② 편성</button>
+        <button class="tab" data-tab="compare">③ 비교</button>
+      </nav>
+      <div class="top-actions">
+        <button id="btn-undo" class="icon" title="되돌리기 (Ctrl+Z)">↶</button>
+        <button id="btn-redo" class="icon" title="다시하기 (Ctrl+Shift+Z)">↷</button>
+        <span id="save-ind" class="save-ind">저장됨</span>
+        <button id="btn-import-proj" class="ghost sm">가져오기</button>
+        <button id="btn-export-proj" class="ghost sm">내보내기</button>
+        <button id="btn-logout" class="ghost sm" style="display:none">로그아웃</button>
+        <input id="file-proj" type="file" accept=".json,application/json" hidden />
+      </div>
     </header>
 
-    <main class="layout">
-      <!-- 좌측: 입력/설정 -->
-      <section class="panel">
-        <h2>1. 데이터 입력</h2>
-        <div class="row">
-          <button id="btn-sample" class="primary">샘플 데이터 불러오기</button>
-          <button id="btn-tmpl-students" class="ghost">학생 템플릿</button>
-          <button id="btn-tmpl-relations" class="ghost">관계 템플릿</button>
-        </div>
-
-        <div class="field">
-          <label>수강생 마스터 CSV (이름·역량·성향·MBTI·이슈)</label>
-          <input id="file-students" type="file" accept=".csv" />
-          <textarea id="ta-students" rows="4" placeholder="여기에 CSV를 붙여넣거나 위에서 파일 선택"></textarea>
-        </div>
-        <div class="field">
-          <label>관계 평가 CSV (FROM,TO,TYPE=POS/NEG,W,NOTE) — 선택</label>
-          <input id="file-relations" type="file" accept=".csv" />
-          <textarea id="ta-relations" rows="4" placeholder="관계 데이터가 없으면 성향·역량·이슈만으로 구성"></textarea>
-        </div>
-        <div id="data-status" class="status"></div>
-
-        <details class="adv">
-          <summary>운영진 강제 규칙 (선택)</summary>
-          <p class="muted">한 줄에 한 쌍씩 <code>S01,S02</code> 형식. 데이터보다 우선합니다.</p>
-          <div class="field">
-            <label>강제 결합 (반드시 같은 팀)</label>
-            <textarea id="ta-together" rows="2" placeholder="S01,S07&#10;S03,S10"></textarea>
-          </div>
-          <div class="field">
-            <label>강제 분리 (반드시 다른 팀)</label>
-            <textarea id="ta-apart" rows="2" placeholder="S02,S05"></textarea>
-          </div>
-        </details>
-
-        <h2>2. 팀 구성</h2>
-        <div class="field inline">
-          <label>구성 방식</label>
-          <select id="mode">
-            <option value="teams">팀 개수로</option>
-            <option value="sizes">팀 크기 직접</option>
-          </select>
-        </div>
-        <div class="field inline" id="wrap-teams">
-          <label>팀 개수</label>
-          <input id="teams" type="number" min="1" value="4" />
-        </div>
-        <div class="field inline" id="wrap-sizes" style="display:none">
-          <label>팀 크기 (쉼표)</label>
-          <input id="sizes" type="text" value="6,6,6,5" />
-        </div>
-        <div class="field inline">
-          <label>추천안 개수</label>
-          <input id="options" type="number" min="1" max="10" value="3" />
-        </div>
-        <div class="field inline">
-          <label>탐색 강도(restarts)</label>
-          <input id="restarts" type="number" min="10" max="400" value="80" />
-        </div>
-        <div class="field inline">
-          <label>시드</label>
-          <input id="seed" type="number" value="42" />
-        </div>
-
-        <details class="adv">
-          <summary>고급: 가중치 / 강도</summary>
-          <p class="muted">관계·성향·이슈 우선, 역량은 보조가 기본값입니다.</p>
-          <div class="grid2">
-            <label>갈등 분리<input id="w-conflict" type="number" step="1" value="100" /></label>
-            <label>긍정 유지<input id="w-positive" type="number" step="1" value="8" /></label>
-            <label>고이슈 격리<input id="w-issue_stack" type="number" step="1" value="40" /></label>
-            <label>이슈 분산<input id="w-issue_balance" type="number" step="1" value="10" /></label>
-            <label>성향 다양성<input id="w-disp_diversity" type="number" step="1" value="16" /></label>
-            <label>리더 확보<input id="w-leader" type="number" step="1" value="14" /></label>
-            <label>MBTI 균형<input id="w-mbti_balance" type="number" step="1" value="8" /></label>
-            <label>역량 커버리지<input id="w-competency_coverage" type="number" step="1" value="8" /></label>
-            <label>역량 평준화(보조)<input id="w-competency_balance" type="number" step="1" value="6" /></label>
-            <label>갈등 강도<input id="w-conflict_intensity" type="number" step="0.1" value="1.0" /></label>
-            <label>긍정 강도<input id="w-positive_intensity" type="number" step="0.1" value="0.5" /></label>
-            <label>강제 결합 W<input id="w-force_together" type="number" step="50" value="1000" /></label>
-            <label>강제 분리 W<input id="w-force_separate" type="number" step="50" value="1000" /></label>
-            <label>역량 평준화 방식
-              <select id="w-competency_metric">
-                <option value="stdev">표준편차(전반 평준화)</option>
-                <option value="range">최대격차(최악 억제)</option>
-              </select>
-            </label>
-          </div>
-        </details>
-
-        <button id="btn-run" class="primary big">팀 추천 생성</button>
-      </section>
-
-      <!-- 우측: 편성 보드 -->
-      <section class="panel results">
-        <div class="results-head">
-          <h2>팀 편성</h2>
-          <div class="results-actions">
-            <button id="btn-blank" class="ghost" disabled title="모든 인원을 미배정으로 두고 처음부터 조립">빈 편성 시작</button>
-            <button id="btn-save-comp" class="ghost" disabled>현재 조합 저장</button>
-            <button id="btn-export" class="ghost" disabled>CSV 내보내기</button>
-          </div>
-        </div>
-
-        <!-- 조합 목록: 하나를 골라 보드에 표시 -->
-        <div class="comp-bar">
-          <span class="comp-bar-label">조합 목록</span>
-          <div id="comp-list" class="comp-list">
-            <span class="placeholder small">아직 없음 — 추천을 생성하거나 조합을 저장하세요</span>
-          </div>
-        </div>
-
-        <div id="summary" class="summary"></div>
-        <div id="score-parts" class="parts"></div>
-        <div id="flags"></div>
-
-        <!-- 드래그 편성 보드 -->
-        <div id="board" class="board">
-          <p class="placeholder">데이터를 불러오고 <b>팀 추천 생성</b>을 누르세요.</p>
-        </div>
-        <p id="board-hint" class="board-hint" style="display:none">
-          💡 블럭을 드래그해 팀 사이로 옮기세요. (또는 블럭 클릭 후 대상 팀 클릭)
-          변경하면 점수가 즉시 갱신됩니다. 마음에 들면 <b>현재 조합 저장</b>.
-        </p>
-      </section>
+    <main class="workspace">
+      <section id="tab-data" class="tabpane"></section>
+      <section id="tab-board" class="tabpane"></section>
+      <section id="tab-compare" class="tabpane"></section>
     </main>
 
     <div id="overlay" class="overlay" style="display:none"><div class="spinner"></div><p>계산 중…</p></div>
+    <div id="toast" class="toast" aria-live="polite"></div>
   </div>
 
   <script src="js/sample.js"></script>
   <script src="js/teambuilder.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/dnd.js"></script>
+  <script src="js/problems.js"></script>
+  <script src="js/view-data.js"></script>
+  <script src="js/view-board.js"></script>
+  <script src="js/view-compare.js"></script>
   <script src="js/app.js"></script>
   <script src="js/auth.js"></script>
 </body>

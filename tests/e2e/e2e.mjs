@@ -1,289 +1,192 @@
-/* 브라우저 E2E 테스트 (Playwright + 실제 Chromium).
+/* 팀빌딩 스튜디오 브라우저 E2E (Playwright + 실제 Chromium).
  *
- * 검증 시나리오:
- *   1) 로그인 게이트: 잘못된 PW 거부 / 올바른 자격증명 통과
- *   2) 10·25·60명 규모 각각에 대해 실제 앱에서 팀 추천 생성 후 결과 검증
- *      - 인식 인원수 일치, 추천안 개수, 팀 크기 합/균형, 전원 1회 배정
- *      - 최상위 추천안의 같은 팀 내 갈등쌍 0개(✅ 플래그)
- *      - 추천안들이 서로 다른 구성
- *   3) CSV 내보내기(다운로드) 동작 및 행 수 검증
- *
+ * 커버: 로그인 게이트 · 데이터 인라인 편집 · 자동 편성 · 조합 목록 선택 ·
+ *       포인터 드래그 이동 · 핀 잠금 후 부분 재편성 · 문제 자동 해결 ·
+ *       팀장/메모/저장·재로드 유지 · undo/redo · 영속성(새로고침) ·
+ *       프로젝트 내보내기/가져오기 · CSV 내보내기 · 비교 탭.
+ * (규모 10·25·60 검증은 Python CLI E2E(run_cli.py)가 담당)
  * 실행: node tests/e2e/e2e.mjs
- * (데이터는 data/make_sample.py 로 각 규모마다 생성해 앱에 붙여넣어 구동)
  */
-import { chromium } from "playwright-core";
+import pkg from "playwright-core"; const { chromium } = pkg;
 import http from "node:http";
 import { readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO = path.resolve(__dirname, "..", "..");
-const DOCS = path.join(REPO, "docs");
+const DOCS = path.resolve(__dirname, "..", "..", "docs");
 const CHROME = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+const CRED = { id: "hkadmin", pw: "teambuilder2026" };
+const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml" };
 
-const CREDENTIALS = { id: "hkadmin", pw: "teambuilder2026" };
-const CASES = [
-  { n: 10, teams: 2 },
-  { n: 25, teams: 5 },
-  { n: 60, teams: 10 },
-];
-
-// ---- 단순 정적 서버 (docs/ 제공, localhost = secure context) -------------
-const MIME = { ".html": "text/html", ".js": "text/javascript",
-  ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json" };
 function startServer() {
   const server = http.createServer((req, res) => {
-    let p = decodeURIComponent(req.url.split("?")[0]);
-    if (p === "/") p = "/index.html";
+    let p = decodeURIComponent(req.url.split("?")[0]); if (p === "/") p = "/index.html";
     const fp = path.join(DOCS, path.normalize(p));
     if (!fp.startsWith(DOCS)) { res.writeHead(403); res.end(); return; }
-    try {
-      const body = readFileSync(fp);
-      res.writeHead(200, { "Content-Type": MIME[path.extname(fp)] || "application/octet-stream" });
-      res.end(body);
-    } catch { res.writeHead(404); res.end("not found"); }
+    try { res.writeHead(200, { "Content-Type": MIME[path.extname(fp)] || "application/octet-stream" }); res.end(readFileSync(fp)); }
+    catch { res.writeHead(404); res.end("nf"); }
   });
-  return new Promise((resolve) => server.listen(0, "127.0.0.1", () =>
-    resolve({ server, port: server.address().port })));
+  return new Promise((r) => server.listen(0, "127.0.0.1", () => r({ server, port: server.address().port })));
 }
 
-// ---- 데이터 생성 (실제 generator 사용) -----------------------------------
-function genData(n, seed = 7) {
-  const dir = mkdtempSync(path.join(tmpdir(), `tb-n${n}-`));
-  execFileSync("python3", [path.join(REPO, "data", "make_sample.py"),
-    "--n", String(n), "--seed", String(seed), "--out-dir", dir]);
-  return {
-    students: readFileSync(path.join(dir, "students.csv"), "utf-8"),
-    relations: readFileSync(path.join(dir, "relations.csv"), "utf-8"),
-    meta: JSON.parse(readFileSync(path.join(dir, "meta.json"), "utf-8")),
-  };
-}
+let passed = 0, failed = 0; const fails = [];
+function check(c, l) { if (c) { passed++; console.log("  ✅ " + l); } else { failed++; fails.push(l); console.log("  ❌ " + l); } }
 
-// ---- 작은 단언 헬퍼 ------------------------------------------------------
-let passed = 0, failed = 0;
-const failures = [];
-function check(cond, label) {
-  if (cond) { passed++; console.log(`  ✅ ${label}`); }
-  else { failed++; failures.push(label); console.log(`  ❌ ${label}`); }
+async function login(pg, base) {
+  await pg.goto(base + "/index.html");
+  if (await pg.isVisible("#login-screen")) {
+    await pg.fill("#login-id", CRED.id); await pg.fill("#login-pw", CRED.pw);
+    await pg.click("#login-form button[type=submit]");
+  }
+  await pg.waitForSelector("#app", { state: "visible", timeout: 5000 });
 }
+const buildWait = (pg) => pg.waitForFunction(() => window.Store && Store.project().compositions.length > 0 && Store.project().board.teams.length > 0, { timeout: 60000 });
+async function goBuild(pg) { await pg.click('.tab[data-tab="board"]'); await pg.click('[data-act="build"]'); await buildWait(pg); await pg.waitForTimeout(120); }
 
-async function login(page, base, id, pw) {
-  await page.goto(base + "/index.html");
-  await page.fill("#login-id", id);
-  await page.fill("#login-pw", pw);
-  await page.click("#login-form button[type=submit]");
+// 포인터 기반 드래그 (dnd.js는 pointer 이벤트 사용)
+async function drag(pg, id, zoneSel) {
+  const src = pg.locator(`#board .block[data-id="${id}"]`); const box = await src.boundingBox();
+  const tgt = pg.locator(zoneSel); const tb = await tgt.boundingBox();
+  await pg.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await pg.mouse.down();
+  await pg.mouse.move(box.x + box.width / 2 + 12, box.y + box.height / 2 + 12);
+  await pg.mouse.move(tb.x + tb.width / 2, tb.y + 24);
+  await pg.mouse.move(tb.x + tb.width / 2, tb.y + 26);
+  await pg.mouse.up(); await pg.waitForTimeout(80);
 }
 
 async function run() {
   const { server, port } = await startServer();
   const base = `http://127.0.0.1:${port}`;
   const browser = await chromium.launch({ executablePath: CHROME, headless: true });
-  const ctx = await browser.newContext({ acceptDownloads: true });
-  const page = await ctx.newPage();
+  const ctx = await browser.newContext({ acceptDownloads: true, viewport: { width: 1400, height: 950 } });
+  const pg = await ctx.newPage();
+  const perr = []; pg.on("pageerror", (e) => perr.push(e.message));
 
   try {
-    // === 1) 로그인 게이트 ===
+    // 1) 로그인 게이트
     console.log("\n[로그인 게이트]");
-    await login(page, base, "hkadmin", "wrong-password");
-    await page.waitForTimeout(300);
-    check(await page.isHidden("#app"), "잘못된 PW → 앱 접근 차단");
-    check((await page.textContent("#login-error")).includes("올바르지"),
-      "잘못된 PW → 오류 메시지 표시");
+    await pg.goto(base + "/index.html");
+    await pg.fill("#login-id", "hkadmin"); await pg.fill("#login-pw", "wrong"); await pg.click("#login-form button[type=submit]");
+    await pg.waitForTimeout(250);
+    check(await pg.isHidden("#app"), "잘못된 PW → 앱 차단");
+    await login(pg, base);
+    check(await pg.isVisible("#app"), "올바른 자격증명 → 진입");
 
-    await login(page, base, CREDENTIALS.id, CREDENTIALS.pw);
-    await page.waitForSelector("#app", { state: "visible", timeout: 5000 });
-    // 접힌 <details>(강제 규칙/고급 설정) 펼쳐서 입력 가능하게
-    await page.evaluate(() =>
-      document.querySelectorAll("details").forEach((d) => { d.open = true; }));
-    check(true, "올바른 자격증명 → 앱 진입");
+    // 2) 데이터 탭 — 샘플 + 인라인 편집
+    console.log("\n[데이터]");
+    await pg.click('[data-act="sample"]');
+    await pg.waitForFunction(() => /수강생 23/.test(document.querySelector(".data-status")?.textContent || ""), { timeout: 5000 });
+    check(true, "샘플 23명 로딩");
+    const firstId = await pg.evaluate(() => Store.project().students[0].id);
+    await pg.fill(`.cell[data-id="${firstId}"][data-col="name"]`, "테스트수강생");
+    await pg.locator(`.cell[data-id="${firstId}"][data-col="name"]`).blur();
+    check(await pg.evaluate((id) => Store.project().students.find((s) => s.id === id).name === "테스트수강생", firstId), "인라인 이름 편집 반영");
+    const beforeN = await pg.evaluate(() => Store.project().students.length);
+    await pg.click('[data-act="add-student"]');
+    check(await pg.evaluate((n) => Store.project().students.length === n + 1, beforeN), "＋학생 추가");
+    await pg.click(`[data-delstu]`); // 첫 삭제 버튼
+    check(await pg.evaluate((n) => Store.project().students.length === n, beforeN), "학생 삭제");
 
-    // === 2) 규모별 팀 빌딩 ===
-    for (const c of CASES) {
-      console.log(`\n[N=${c.n}명 · ${c.teams}팀]`);
-      const data = genData(c.n);
+    // 3) 자동 편성
+    console.log("\n[자동 편성]");
+    await goBuild(pg);
+    const snap = () => pg.evaluate(() => {
+      const p = Store.project();
+      return { comps: p.compositions.length, teams: p.board.teams.map((t) => t.slice()), pool: p.board.pool.length,
+        active: p.activeIndex, total: document.querySelector(".part.total")?.textContent,
+        okFlag: !!document.querySelector(".flags-inline .flag.ok"), problems: [...document.querySelectorAll(".prob")].map((x) => x.textContent) };
+    });
+    let s = await snap();
+    const N = await pg.evaluate(() => Store.project().students.length);
+    check(s.comps >= 1 && s.comps <= 3, `조합 ${s.comps}개`);
+    const members = s.teams.flat();
+    check(members.length === N && new Set(members).size === N, `단일 조합 표시: 전원 ${N}명 1회`);
+    check(s.pool === 0, "미배정 0");
+    check(s.okFlag, "갈등쌍 0 플래그");
+    // 고이슈 격리
+    const hiStack = await pg.evaluate(() => { const p = Store.project(), b = Store.byId(); return p.board.teams.filter((t) => t.filter((id) => TeamBuilder.highIssue(b.get(id))).length > 1).length; });
+    check(hiStack === 0, "고이슈 팀당 최대 1명");
 
-      // 이전 케이스의 강제 규칙 잔여값 제거
-      await page.fill("#ta-together", "");
-      await page.fill("#ta-apart", "");
-      await page.fill("#ta-students", data.students);
-      await page.fill("#ta-relations", data.relations);
-      // 인식 상태 갱신 대기
-      await page.waitForFunction(
-        (n) => document.getElementById("data-status").textContent.includes(`학생 ${n}명`),
-        c.n, { timeout: 5000 });
-      check(true, "데이터 인식 (학생 수 표시)");
-
-      await page.selectOption("#mode", "teams");
-      await page.fill("#teams", String(c.teams));
-      await page.fill("#options", "3");
-      await page.fill("#restarts", "40");
-      await page.fill("#seed", "42");
-
-      await page.click("#btn-run");
-      await page.waitForSelector("#board .teams-grid .team-col", { timeout: 90000 });
-      await page.waitForFunction(
-        () => document.getElementById("overlay").style.display === "none",
-        null, { timeout: 90000 });
-
-      const snap = () => page.evaluate(() => ({
-        summary: document.getElementById("summary").innerText,
-        okFlag: !!document.querySelector("#flags .flag.ok"),
-        chips: [...document.querySelectorAll("#comp-list .comp-chip")].map((c) =>
-          ({ text: c.innerText.replace(/\s+/g, " ").trim(), active: c.classList.contains("active") })),
-        teams: [...document.querySelectorAll("#board .teams-grid .team-col")].map((col) =>
-          [...col.querySelectorAll(".block")].map((b) => b.dataset.id)),
-        pool: [...document.querySelectorAll("#board > .team-col.pool .block")].map((b) => b.dataset.id),
-      }));
-
-      const result = await snap();
-      check(result.summary.includes(`${c.n}명`), `요약에 ${c.n}명 표기`);
-      check(result.chips.length >= 1 && result.chips.length <= 3,
-        `조합 목록 ${result.chips.length}개 (1~3)`);
-      check(result.chips[0].active, "첫 조합이 활성으로 표시");
-      check(result.pool.length === 0, "미배정 0명 (전원 배치)");
-
-      // 화면엔 조합 하나만: 보드 팀 블럭 합이 정확히 N (3×N 아님)
-      const members = result.teams.flat();
-      check(members.length === c.n && new Set(members).size === c.n,
-        `단일 조합 표시: 보드에 전원 ${c.n}명 정확히 1회`);
-      const sizes = result.teams.map((t) => t.length);
-      check(sizes.length === c.teams, `팀 개수 ${c.teams}개`);
-      check(sizes.reduce((a, b) => a + b, 0) === c.n, "팀 크기 합 = 인원수");
-      check(Math.max(...sizes) - Math.min(...sizes) <= 1, "팀 크기 균형(차이 ≤1)");
-      check(result.okFlag, "표시 조합: 같은 팀 내 갈등쌍 0개(✅)");
-      // 고이슈(⚠2/⚠3) 학생이 한 팀에 2명 이상 몰리지 않는지
-      const hiPerTeam = await page.evaluate(() =>
-        [...document.querySelectorAll("#board .teams-grid .team-col")].map((c) =>
-          c.querySelectorAll(".issue-badge.lv2, .issue-badge.lv3").length));
-      check(Math.max(0, ...hiPerTeam) <= 1, "고이슈 학생 팀당 최대 1명(격리)");
-
-      // 목록에서 다른 조합 선택 → 보드 교체 (조합이 2개 이상일 때)
-      if (result.chips.length >= 2) {
-        const sig0 = result.teams.map((t) => [...t].sort().join(",")).sort().join("|");
-        await page.click('#comp-list .comp-chip[data-idx="1"]');
-        const picked = await snap();
-        const sig1 = picked.teams.map((t) => [...t].sort().join(",")).sort().join("|");
-        check(picked.chips[1].active && sig1 !== sig0, "목록에서 2번 조합 선택 → 다른 구성 표시");
-        await page.click('#comp-list .comp-chip[data-idx="0"]'); // 1번으로 복귀
-      }
-
-      // === 드래그&드롭 · 팀장 · 메모 · 저장 · CSV (N=25) ===
-      if (c.n === 25) {
-        console.log("[드래그&드롭 편성 수정]");
-        const cur = await snap();
-        const srcId = cur.teams[0][0];
-        // HTML5 DnD 이벤트를 정확한 요소에 직접 디스패치(좌표 기반 dragTo의 오조준 회피)
-        const moved = await page.evaluate((sid) => {
-          const src = document.querySelector(`#board .block[data-id="${sid}"]`);
-          const dst = document.querySelector('#board .team-col[data-zone="team-1"]');
-          const dt = new DataTransfer();
-          src.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: dt }));
-          dst.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer: dt }));
-          dst.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: dt }));
-          src.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: dt }));
-          const teams = [...document.querySelectorAll("#board .teams-grid .team-col")].map((col) =>
-            [...col.querySelectorAll(".block")].map((b) => b.dataset.id));
-          return { inT1: teams[0].includes(sid), inT2: teams[1].includes(sid),
-            total: teams.flat().length,
-            dirty: document.getElementById("summary").innerText.includes("미저장") };
-        }, srcId);
-        check(!moved.inT1 && moved.inT2, `드래그: ${srcId} 팀1→팀2 이동`);
-        check(moved.total === c.n, "이동 후에도 전원 유지");
-        check(moved.dirty, "이동 후 '미저장 변경' 표시");
-
-        console.log("[팀장 지정 · 팀 메모]");
-        const leadId = (await snap()).teams[0][0]; // 팀1 첫 블럭
-        await page.click(`#board .block[data-id="${leadId}"] .btn-leader`);
-        const led = await page.evaluate((id) => ({
-          onBlock: document.querySelector(`#board .block[data-id="${id}"]`).classList.contains("leader"),
-          headerHas: document.querySelector("#board .teams-grid .team-col").innerText.includes("팀장"),
-        }), leadId);
-        check(led.onBlock && led.headerHas, `팀장 지정: ${leadId} 표시`);
-
-        const NOTE = "역량 보강 필요";
-        await page.fill("#board .teams-grid .team-col:nth-child(1) .team-note", NOTE);
-        const noteVal = await page.$eval(
-          "#board .teams-grid .team-col:nth-child(1) .team-note", (el) => el.value);
-        check(noteVal === NOTE, "팀 메모 입력 반영");
-
-        console.log("[현재 조합 저장]");
-        await page.click("#btn-save-comp");
-        const afterSave = await snap();
-        check(afterSave.chips.length === 4, `저장 후 목록 4개 (${afterSave.chips.length})`);
-        check(afterSave.chips.some((c2) => c2.text.includes("저장")), "저장 조합 칩 생성");
-
-        // 다른 조합 갔다가 저장본으로 복귀 → 팀장/메모 유지
-        await page.click('#comp-list .comp-chip[data-idx="0"]');
-        await page.click('#comp-list .comp-chip[data-idx="3"]');
-        const restored = await page.evaluate((id) => ({
-          leader: document.querySelector(`#board .block[data-id="${id}"]`) &&
-            document.querySelector(`#board .block[data-id="${id}"]`).classList.contains("leader"),
-          note: document.querySelector("#board .teams-grid .team-col:nth-child(1) .team-note").value,
-        }), leadId);
-        check(restored.leader, "저장·재로드 후 팀장 유지");
-        check(restored.note === NOTE, "저장·재로드 후 메모 유지");
-
-        console.log("[CSV 내보내기]");
-        const [dl] = await Promise.all([
-          page.waitForEvent("download", { timeout: 10000 }),
-          page.click("#btn-export"),
-        ]);
-        const csvText = readFileSync(await dl.path(), "utf-8").replace(/^﻿/, "");
-        const lines = csvText.trim().split("\n");
-        check(lines.length === 1 + afterSave.chips.length * c.n,
-          `CSV 행 수 ${lines.length} = 1+${afterSave.chips.length}×${c.n}`);
-        check(lines[0].startsWith("composition,team,team_leader,team_note,id,name"),
-          "CSV 헤더에 team_leader·team_note 포함");
-        check(lines.some((ln) => ln.split(",")[2] === "Y"), "CSV에 팀장(team_leader=Y) 행 존재");
-        check(csvText.includes(NOTE), "CSV에 팀 메모 포함");
-      }
-
-      // === 운영진 강제 규칙 (N=25) ===
-      if (c.n === 25) {
-        console.log("[운영진 강제 규칙: S02+S20 결합 / S05-S06 분리]");
-        await page.fill("#ta-together", "S02,S20");
-        await page.fill("#ta-apart", "S05,S06");
-        await page.click("#btn-run");
-        await page.waitForSelector("#board .teams-grid .team-col", { timeout: 90000 });
-        await page.waitForFunction(
-          () => document.getElementById("overlay").style.display === "none",
-          null, { timeout: 90000 });
-
-        const forced = await page.evaluate(() => {
-          const teams = [...document.querySelectorAll("#board .teams-grid .team-col")].map((col, ti) =>
-            [...col.querySelectorAll(".block")].map((b) => b.dataset.id));
-          const teamOf = {};
-          teams.forEach((ids, ti) => ids.forEach((id) => (teamOf[id] = ti)));
-          return { okForced: document.getElementById("flags").innerText.includes("강제 규칙 모두 충족"), teamOf };
-        });
-        check(forced.okForced, "표시 조합: 운영진 강제 규칙 모두 충족(✅)");
-        check(forced.teamOf.S02 === forced.teamOf.S20, "강제 결합: S02·S20 같은 팀");
-        check(forced.teamOf.S05 !== forced.teamOf.S06, "강제 분리: S05·S06 다른 팀");
-
-        // 모순 제약 → 오류 표시
-        await page.fill("#ta-together", "S05,S06");
-        await page.fill("#ta-apart", "S05,S06");
-        await page.click("#btn-run");
-        await page.waitForFunction(
-          () => /오류|모순/.test(document.getElementById("board").innerText),
-          null, { timeout: 90000 });
-        check(true, "모순 제약(결합+분리 동일 쌍) → 오류 메시지");
-      }
+    // 4) 조합 목록 선택
+    if (s.comps >= 2) {
+      const sig = (t) => t.map((x) => x.slice().sort().join(",")).sort().join("|");
+      const before = sig(s.teams);
+      await pg.click('.comp-chip[data-comp="1"]'); await pg.waitForTimeout(80);
+      const s2 = await snap();
+      check(s2.active === 1 && sig(s2.teams) !== before, "목록에서 2번 조합 선택 → 다른 구성");
+      await pg.click('.comp-chip[data-comp="0"]'); await pg.waitForTimeout(80);
     }
-  } finally {
-    await browser.close();
-    server.close();
-  }
 
-  console.log(`\n${"=".repeat(48)}`);
-  console.log(`E2E 결과: ${passed} 통과 / ${failed} 실패`);
-  if (failed) { console.log("실패 항목:"); failures.forEach((f) => console.log("  - " + f)); }
-  console.log("=".repeat(48));
+    // 5) 포인터 드래그 이동
+    console.log("\n[드래그/핀/문제]");
+    const t0 = (await snap()).teams;
+    const moveId = t0[0][0];
+    await drag(pg, moveId, '#board .team-col[data-zone="team-1"] .dropzone');
+    const moved = await pg.evaluate((id) => { const t = Store.project().board.teams; return { in0: t[0].includes(id), in1: t[1].includes(id) }; }, moveId);
+    check(!moved.in0 && moved.in1, `드래그: ${moveId} 팀1→팀2`);
+    await pg.click("#btn-undo"); await pg.waitForTimeout(80);
+    check(await pg.evaluate((id) => Store.project().board.teams[0].includes(id), moveId), "undo로 드래그 되돌림");
+
+    // 6) 핀 잠금 + 부분 재편성
+    const lockedIds = await pg.evaluate(() => Store.project().board.teams[0].slice());
+    await pg.click('[data-lockteam="0"]');
+    check(await pg.evaluate((ids) => ids.every((id) => Store.project().pins[id] != null), lockedIds), "팀 잠금 → 전원 핀");
+    await pg.evaluate(() => Store.setSettings({ seed: 777 }));
+    await pg.click('[data-act="build"]'); await buildWait(pg); await pg.waitForTimeout(120);
+    const kept = await pg.evaluate((ids) => Store.project().board.teams.some((t) => t.length === ids.length && ids.every((id) => t.includes(id))), lockedIds);
+    check(kept, "핀 유지 재편성: 잠근 팀 그대로");
+
+    // 7) 문제 자동 해결 (고이슈 겹침 생성 → fix)
+    await pg.evaluate(() => { const p = Store.project(); const hi = p.students.filter((x) => x.issue_level >= 2).map((x) => x.id); Store.moveStudent(hi[0], "team-" + Store.teamOf(hi[1])); });
+    await pg.waitForFunction(() => [...document.querySelectorAll(".prob")].some((x) => /고이슈/.test(x.textContent)), { timeout: 5000 });
+    check(true, "수동 이동으로 고이슈 겹침 문제 표시");
+    await pg.click(".prob button[data-fix]"); await pg.waitForTimeout(150);
+    check(await pg.evaluate(() => { const p = Store.project(), b = Store.byId(); return p.board.teams.filter((t) => t.filter((id) => TeamBuilder.highIssue(b.get(id))).length > 1).length === 0; }), "자동 해결 후 고이슈 겹침 0");
+
+    // 8) 팀장/메모 + 저장·재로드 유지
+    console.log("\n[팀장/메모/저장]");
+    // 핀 해제 후 저장(미배정 없음 상태)
+    const leadId = await pg.evaluate(() => Store.project().board.teams[0][0]);
+    await pg.click(`.block[data-id="${leadId}"] .btn-leader`); await pg.waitForTimeout(60);
+    check(await pg.evaluate((id) => Store.project().board.leaderByTeam[0] === id, leadId), "팀장 지정");
+    await pg.fill('.team-note[data-note="0"]', "발표 강한 팀");
+    await pg.locator('.team-note[data-note="0"]').blur(); await pg.waitForTimeout(60);
+    await pg.click('[data-act="save"]'); await pg.waitForTimeout(80);
+    const savedIdx = await pg.evaluate(() => Store.project().compositions.length - 1);
+    await pg.click('.comp-chip[data-comp="0"]'); await pg.waitForTimeout(60);
+    await pg.click(`.comp-chip[data-comp="${savedIdx}"]`); await pg.waitForTimeout(80);
+    check(await pg.evaluate((id) => Store.project().board.leaderByTeam[0] === id, leadId), "저장·재로드 후 팀장 유지");
+    check(await pg.evaluate(() => Store.project().board.notes[0] === "발표 강한 팀"), "저장·재로드 후 메모 유지");
+
+    // 9) CSV 내보내기
+    const [dl] = await Promise.all([pg.waitForEvent("download", { timeout: 10000 }), pg.click('[data-act="export"]')]);
+    const csv = readFileSync(await dl.path(), "utf-8").replace(/^﻿/, "");
+    check(csv.split("\n")[0].startsWith("composition,team,team_name,team_leader,team_note,id,name"), "CSV 헤더 정상");
+    check(/,Y,/.test(csv) || csv.includes(",Y\n") || csv.includes("Y,"), "CSV에 팀장/핀 표기 존재");
+
+    // 10) 영속성 (새로고침)
+    console.log("\n[영속성/프로젝트/비교]");
+    const beforeReload = await pg.evaluate(() => ({ c: Store.project().compositions.length, n: Store.project().name }));
+    await pg.evaluate(() => Store.flush()); await pg.reload(); await login(pg, base);
+    const afterReload = await pg.evaluate(() => ({ c: Store.project().compositions.length, n: Store.project().name }));
+    check(afterReload.c === beforeReload.c && afterReload.n === beforeReload.n, `새로고침 후 복원 (조합 ${afterReload.c})`);
+
+    // 11) 프로젝트 내보내기 → 가져오기
+    const exp = await pg.evaluate(() => Store.exportProject());
+    await pg.evaluate((j) => Store.importProject(j), exp);
+    check(await pg.evaluate(() => Store.listProjects().length >= 2), "프로젝트 export→import 왕복");
+
+    // 12) 비교 탭
+    await pg.click('.tab[data-tab="compare"]'); await pg.waitForTimeout(80);
+    check(await pg.evaluate(() => document.querySelectorAll(".cmp-table tbody tr").length >= 5 && document.querySelectorAll(".cmp-roster").length >= 1), "비교 탭: 델타 표 + 로스터");
+
+    check(perr.length === 0, "페이지 에러 없음" + (perr.length ? ": " + perr[0] : ""));
+  } finally {
+    await browser.close(); server.close();
+  }
+  console.log(`\n${"=".repeat(48)}\nE2E 결과: ${passed} 통과 / ${failed} 실패\n${"=".repeat(48)}`);
+  fails.forEach((f) => console.log("  - " + f));
   process.exit(failed ? 1 : 0);
 }
-
-run().catch((e) => { console.error("E2E 실행 오류:", e); process.exit(2); });
+run().catch((e) => { console.error("E2E 오류:", e); process.exit(2); });
