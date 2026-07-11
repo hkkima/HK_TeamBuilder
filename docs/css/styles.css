@@ -126,7 +126,9 @@ table.grid select { width: 100%; min-width: 80px; }
 .cand { color: var(--brand); font-size: .72rem; }
 .issue-badge { font-size: .62rem; border-radius: 4px; padding: 0 .25rem; color: #fff; background: var(--warn); } .issue-badge.lv2 { background: #ea580c; } .issue-badge.lv3 { background: var(--bad); }
 .sp-badge { font-size: .62rem; border-radius: 4px; padding: 0 .28rem; color: #fff; background: #7c3aed; font-weight: 700; }
-td.ctr { text-align: center; } .sp-check { width: 18px; height: 18px; }
+.cat-badge { font-size: .6rem; border-radius: 4px; padding: 0 .22rem; color: #fff; font-weight: 700; }
+td.ctr { text-align: center; } td.ctr input[type=checkbox] { width: 17px; height: 17px; }
+.cell.ord { min-width: 82px; } .team-warn.role-miss { color: var(--brand-d); }
 .btn-pin, .btn-leader { border: 0; background: transparent; font-size: .78rem; line-height: 1; padding: 0 .1rem; filter: grayscale(1); opacity: .35; min-height: auto; }
 .btn-pin { margin-left: auto; } .btn-pin:hover, .btn-leader:hover { opacity: .7; } .btn-pin.on, .btn-leader.on { filter: none; opacity: 1; }
 .b-sub { font-size: .68rem; color: var(--muted); display: flex; gap: .4rem; align-items: center; }

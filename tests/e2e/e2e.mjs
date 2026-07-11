@@ -87,6 +87,7 @@ async function run() {
     check(await pg.evaluate((n) => Store.project().students.length === n + 1, beforeN), "＋학생 추가");
     await pg.click(`[data-delstu]`); // 첫 삭제 버튼
     check(await pg.evaluate((n) => Store.project().students.length === n, beforeN), "학생 삭제");
+    check(await pg.evaluate(() => { const s = document.querySelector(".cell.ord"); return s && s.tagName === "SELECT" && [...s.options].some((o) => o.text === "상" || o.text === "매우 우수"); }), "역량 서수 드롭다운(상/중/하·매우우수~)");
 
     // 3) 자동 편성
     console.log("\n[자동 편성]");
@@ -110,6 +111,13 @@ async function run() {
     // 특수 관리 태그: 자동 편성 시 절대 2명 이상 같은 팀 금지
     const spInfo = await pg.evaluate(() => { const p = Store.project(), b = Store.byId(); const tagged = p.students.filter((s) => s.special).length; const stack = p.board.teams.filter((t) => t.filter((id) => b.get(id).special).length > 1).length; return { tagged, stack }; });
     check(spInfo.tagged >= 2 && spInfo.stack === 0, `특수관리 태그 ${spInfo.tagged}명 → 팀당 최대 1명(하드)`);
+    // 카테고리 태그 격리(같은 카테고리 팀당 ≤1) + 필수 역할 커버
+    const catRole = await pg.evaluate(() => { const p = Store.project(), b = Store.byId();
+      const catStack = ["mental", "health", "sunk"].reduce((a, f) => a + p.board.teams.filter((t) => t.filter((id) => b.get(id)[f]).length > 1).length, 0);
+      const roleMiss = p.board.teams.filter((t) => t.length).reduce((a, t) => a + TeamBuilder.REQUIRED_DISPS.filter((r) => !t.some((id) => TeamBuilder.coversDisp(b.get(id), r))).length, 0);
+      return { catStack, roleMiss }; });
+    check(catRole.catStack === 0, "동일 카테고리 태그 팀당 최대 1명");
+    check(catRole.roleMiss === 0, "팀마다 분위기메이커·매니저·책임자 각 1명");
 
     // 4) 조합 목록 선택
     if (s.comps >= 2) {
@@ -152,6 +160,12 @@ async function run() {
     check(true, "특수관리 수동 겹침 → 문제 표시");
     await pg.click(".prob button[data-fix]"); await pg.waitForTimeout(150);
     check(await pg.evaluate(() => { const p = Store.project(), b = Store.byId(); return p.board.teams.filter((t) => t.filter((id) => b.get(id).special).length > 1).length === 0; }), "자동 해결 후 특수관리 겹침 0");
+    // 멘탈 카테고리 수동 겹침 → 문제 → 자동 해결
+    await pg.evaluate(() => { const p = Store.project(); const men = p.students.filter((x) => x.mental).map((x) => x.id); Store.moveStudent(men[0], "team-" + Store.teamOf(men[1])); });
+    await pg.waitForFunction(() => [...document.querySelectorAll(".prob")].some((x) => /멘탈/.test(x.textContent)), { timeout: 5000 });
+    check(true, "멘탈 카테고리 수동 겹침 → 문제 표시");
+    await pg.locator('.prob:has-text("멘탈") button[data-fix]').first().click(); await pg.waitForTimeout(150);
+    check(await pg.evaluate(() => { const p = Store.project(), b = Store.byId(); return p.board.teams.filter((t) => t.filter((id) => b.get(id).mental).length > 1).length === 0; }), "자동 해결 후 멘탈 겹침 0");
 
     // 8) 팀장/메모 + 저장·재로드 유지
     console.log("\n[팀장/메모/저장]");

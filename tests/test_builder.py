@@ -105,6 +105,21 @@ def test_special_tag():
     print("ok: 특수 태그 팀당 최대 1명 + 초과 예외")
 
 
+def test_flags_and_roles():
+    students, graph, _ = _load()
+    n_teams = 4
+    recs = build_recommendations(students, graph, teams=n_teams, n_options=1, restarts=60)
+    top = recs[0]
+    # 같은 카테고리 태그는 한 팀에 2명 이상 없어야 (샘플은 태그 수 ≤ 팀수라 가능)
+    for f in ("mental", "health", "sunk"):
+        for t in top.teams:
+            assert sum(1 for m in t.members if getattr(m, f)) <= 1, f"{f} 겹침"
+    assert top.score.flag_same_stacks == 0
+    # 필수 역할(분위기메이커·매니저·책임자) 미충족이 최소화되어야
+    assert top.score.role_missing == 0, f"필수 역할 미충족 {top.score.role_missing}"
+    print("ok: 카테고리 격리 + 필수 역할 커버")
+
+
 def test_pins():
     students, graph, _ = _load()
     ids = [s.id for s in students]
@@ -145,6 +160,7 @@ if __name__ == "__main__":
     test_forced_constraints()
     test_name_resolution()
     test_special_tag()
+    test_flags_and_roles()
     test_pins()
     test_options_distinct()
     print("\n전체 통과 ✅")

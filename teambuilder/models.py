@@ -26,6 +26,13 @@ DISPOSITIONS = (DISP_WORKER, DISP_MANAGER, DISP_MOOD,
 # 리더 후보로 보는 성향 (팀장 확보용).
 LEADER_DISPS = (DISP_OWNER, DISP_MANAGER)
 
+# 팀마다 각 1명 이상 있어야 하는 필수 성향(강한 소프트).
+REQUIRED_DISPS = (DISP_MOOD, DISP_MANAGER, DISP_OWNER)
+
+# 소프트 카테고리 태그: (필드명, 표시명). 같은 카테고리는 한 팀 2명 이상 강하게 회피,
+# 서로 다른 카테고리끼리는 약하게 회피.
+FLAG_CATEGORIES = (("mental", "멘탈"), ("health", "건강"), ("sunk", "매몰"))
+
 # 강한 역량으로 보는 기준(1~5 척도) — 역량 커버리지 계산용.
 STRONG_THRESHOLD = 4.0
 # 리더십 후보 기준(1~3 척도).
@@ -69,6 +76,9 @@ class Student:
     issue_level: float = 0.0                # 이슈 강도 (0~3, 0=없음)
     issue_note: str = ""                    # 이슈 비고
     special: bool = False                   # 특수 관리 태그 — 한 팀에 2명 이상 금지(하드)
+    mental: bool = False                    # 멘탈 이슈 (소프트 카테고리)
+    health: bool = False                    # 건강 이슈 (소프트 카테고리)
+    sunk: bool = False                      # 매몰 성향 (소프트 카테고리)
     units: dict[str, float] = field(default_factory=dict)  # 단원별 점수
 
     def mbti_letter(self, axis_index: int) -> Optional[str]:
@@ -89,6 +99,10 @@ class Student:
         if self.leadership is not None and self.leadership >= LEADERSHIP_THRESHOLD:
             return True
         return self.primary_disp in LEADER_DISPS or self.secondary_disp in LEADER_DISPS
+
+    def covers_disp(self, role: str) -> bool:
+        """주/부 성향으로 해당 역할을 맡을 수 있으면 True."""
+        return self.primary_disp == role or self.secondary_disp == role
 
     def is_high_issue(self) -> bool:
         return self.issue_level >= HIGH_ISSUE_LEVEL

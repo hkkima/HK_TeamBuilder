@@ -6,8 +6,10 @@
 
   const esc = (s) => global.UI.esc(s);
   const PART_LABELS = { force_together: "강제결합", force_separate: "강제분리", special_stack: "특수격리", conflict: "갈등분리", positive: "긍정유지",
+    flag_same: "동일태그격리", flag_cross: "교차태그", role_required: "필수역할", role_supporter: "서포터",
     issue_stack: "고이슈격리", issue_balance: "이슈분산", disp_diversity: "성향다양성", leader: "리더확보",
     mbti_balance: "MBTI", competency_coverage: "역량커버", competency_balance: "역량평준(보조)" };
+  const CAT_BADGE = { mental: ["멘", "#db2777"], health: ["건", "#0891b2"], sunk: ["매", "#65a30d"] };
 
   function studentsOf(ids) { const m = Store.byId(); return ids.map((id) => m.get(id)).filter(Boolean); }
   function dispIn(ms) { const c = {}; TB.DISPOSITIONS.forEach((d) => (c[d] = 0)); ms.forEach((m) => { if (c[m.primary_disp] != null) c[m.primary_disp]++; }); const p = TB.DISPOSITIONS.filter((d) => c[d]).map((d) => `${d}${c[d]}`); return p.length ? p.join(" ") : "성향–"; }
@@ -21,10 +23,11 @@
     const cv = TB.compValue(m); const comp = cv != null ? `<span class="comp-val">역량 ${cv.toFixed ? cv.toFixed(1) : cv}</span>` : "";
     const iss = (m.issue_level || 0) > 0 ? `<span class="issue-badge lv${m.issue_level}" title="이슈 ${m.issue_level}${m.issue_note ? " · " + esc(m.issue_note) : ""}">⚠${m.issue_level}</span>` : "";
     const sp = m.special ? '<span class="sp-badge" title="특수 관리 — 한 팀 2명 금지">특</span>' : "";
+    const cats = TB.FLAG_FIELDS.filter((f) => m[f]).map((f) => `<span class="cat-badge" style="background:${CAT_BADGE[f][1]}" title="${f}">${CAT_BADGE[f][0]}</span>`).join("");
     const pin = inPool ? "" : `<button class="btn-pin${pinned ? " on" : ""}" data-pin="${esc(m.id)}" title="이 팀에 고정(핀)">📌</button>`;
     const crown = inPool ? "" : `<button class="btn-leader${isLeader ? " on" : ""}" data-leader="${esc(m.id)}" title="팀장 지정/해제">👑</button>`;
     return `<div class="${cls}" data-id="${esc(m.id)}" title="${esc(m.issue_note || "")}">
-      <div class="b-top"><span class="mbti">${esc(m.mbti || "–")}</span><span class="b-name">${esc(m.name)}</span>${cand}${sp}${iss}${pin}${crown}</div>
+      <div class="b-top"><span class="mbti">${esc(m.mbti || "–")}</span><span class="b-name">${esc(m.name)}</span>${cand}${sp}${cats}${iss}${pin}${crown}</div>
       <div class="b-sub">${m.primary_disp ? `<span class="role-tag">${esc(m.primary_disp)}</span>` : ""}${comp}</div></div>`;
   }
 
@@ -130,7 +133,12 @@
       const ms = studentsOf(ids);
       const teamConf = sb.intra.filter((k) => { const [a, b] = k.split("|"); return ids.includes(a) && ids.includes(b); }).length;
       const spCount = ms.filter((m) => m.special).length;
-      const warn = (teamConf ? `<div class="team-warn">⚠️ 갈등 ${teamConf}</div>` : "") + (spCount > 1 ? `<div class="team-warn">🚫 특수관리 ${spCount}명(금지)</div>` : "");
+      const missRoles = TB.REQUIRED_DISPS.filter((r) => !ms.some((m) => TB.coversDisp(m, r)));
+      const catStack = TB.FLAG_FIELDS.filter((f) => ms.filter((m) => m[f]).length > 1).map((f) => CAT_BADGE[f][0]);
+      const warn = (teamConf ? `<div class="team-warn">⚠️ 갈등 ${teamConf}</div>` : "")
+        + (spCount > 1 ? `<div class="team-warn">🚫 특수관리 ${spCount}명(금지)</div>` : "")
+        + (catStack.length ? `<div class="team-warn">⚠️ 태그겹침 ${catStack.join("·")}</div>` : "")
+        + (missRoles.length && ms.length ? `<div class="team-warn role-miss">필수역할 부족: ${missRoles.join("·")}</div>` : "");
       const lid = p.board.leaderByTeam[ti]; const lname = lid && byId.get(lid) ? esc(byId.get(lid).name) : "미지정";
       const allPinned = ids.length && ids.every((id) => p.pins[id] != null);
       return `<div class="team-col${allPinned ? " team-locked" : ""}" data-zone="team-${ti}">
@@ -170,14 +178,15 @@
   function exportCsv() {
     const p = Store.project(); if (!p.compositions.length) { global.UI.toast("저장/생성된 조합이 없습니다", "bad"); return; }
     const byId = Store.byId();
-    let csv = "﻿composition,team,team_name,team_leader,team_note,id,name,mbti,primary_disp,secondary_disp,comp_avg,leadership,issue_level,issue_note,special,leader_candidate,pinned\n";
+    let csv = "﻿composition,team,team_name,team_leader,team_note,id,name,mbti,primary_disp,secondary_disp,comp_avg,leadership,issue_level,issue_note,special,mental,health,sunk,leader_candidate,pinned\n";
     p.compositions.forEach((c) => {
       const leaders = c.leaderByTeam || [], notes = c.notes || [], names = c.teamNames || [], pins = c.pins || {};
       c.teams.forEach((ids, ti) => ids.forEach((id) => {
         const m = byId.get(id); if (!m) return; const cv = TB.compValue(m);
         const cells = [c.name, ti + 1, names[ti] || ("팀 " + (ti + 1)), leaders[ti] === id ? "Y" : "", notes[ti] || "",
           m.id, m.name, m.mbti, m.primary_disp || "", m.secondary_disp || "", cv == null ? "" : cv.toFixed(2),
-          m.leadership == null ? "" : m.leadership, m.issue_level || 0, m.issue_note || "", m.special ? "Y" : "", TB.leaderCandidate(m) ? "Y" : "", pins[id] != null ? "Y" : ""];
+          m.leadership == null ? "" : m.leadership, m.issue_level || 0, m.issue_note || "", m.special ? "Y" : "",
+          m.mental ? "Y" : "", m.health ? "Y" : "", m.sunk ? "Y" : "", TB.leaderCandidate(m) ? "Y" : "", pins[id] != null ? "Y" : ""];
         csv += cells.map((v) => { const t = String(v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; }).join(",") + "\n";
       }));
     });

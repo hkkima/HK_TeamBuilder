@@ -39,6 +39,23 @@
       if (t.length && !t.some((id) => byId.get(id) && TB.leaderCandidate(byId.get(id))))
         probs.push({ type: "leader", teams: [ti], ids: [], label: `팀 ${ti + 1} 리더 후보 없음`, sev: 1, fixable: true });
     });
+    // 같은 카테고리 태그(멘탈/건강/매몰) 2명↑ 겹침
+    const CATLBL = { mental: "멘탈", health: "건강", sunk: "매몰" };
+    TB.FLAG_FIELDS.forEach((cat) => {
+      board.teams.forEach((t, ti) => {
+        const c = t.filter((id) => byId.get(id) && byId.get(id)[cat]);
+        if (c.length > 1) probs.push({ type: "flag", cat, teams: [ti], ids: c,
+          label: `팀 ${ti + 1} ${CATLBL[cat]} 이슈 ${c.length}명 겹침`, sev: 2, fixable: true });
+      });
+    });
+    // 필수 역할 미충족 (분위기메이커·매니저·책임자)
+    board.teams.forEach((t, ti) => {
+      if (!t.length) return;
+      TB.REQUIRED_DISPS.forEach((role) => {
+        if (!t.some((id) => byId.get(id) && TB.coversDisp(byId.get(id), role)))
+          probs.push({ type: "role", role, teams: [ti], ids: [], label: `팀 ${ti + 1} ${role} 없음`, sev: 2, fixable: true });
+      });
+    });
     probs.sort((a, b) => b.sev - a.sev);
     return { problems: probs, score: sb };
   }
@@ -49,7 +66,7 @@
     const pinned = new Set(Object.keys(pins || {}));
     const base = board.teams.map((t) => t.slice());
     const score = (tt) => TB.scorePartition(tt.map((t) => studentsOf(t, byId)), graph, weights).total;
-    const problemCount = (tt) => countProblem(problem.type, tt, byId, graph, weights);
+    const problemCount = (tt) => countProblem(problem, tt, byId, graph, weights);
     const target = board.teams[problem.teams[0]];
     if (!target) return null;
     const before = problemCount(base);
@@ -85,12 +102,15 @@
     return tt;
   }
 
-  function countProblem(type, teams, byId, graph, weights) {
+  function countProblem(problem, teams, byId, graph, weights) {
+    const type = problem.type;
     const ts = teams.map((t) => t.map((id) => byId.get(id)).filter(Boolean));
     const sb = TB.scorePartition(ts, graph, weights);
     if (type === "conflict") return sb.intra.length;
     if (type === "special") return sb.specialStacks;
     if (type === "stack") return sb.issueStacks;
+    if (type === "flag") { let e = 0; teams.forEach((t) => { const c = t.filter((id) => byId.get(id) && byId.get(id)[problem.cat]).length; if (c > 1) e += c - 1; }); return e; }
+    if (type === "role") return sb.roleMissing;
     if (type === "leader") return teams.filter((t) => t.length && !t.some((id) => byId.get(id) && TB.leaderCandidate(byId.get(id)))).length;
     return 0;
   }

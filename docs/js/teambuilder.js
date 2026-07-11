@@ -6,6 +6,10 @@
   const MBTI_AXES = [["E", "I"], ["N", "S"], ["T", "F"], ["J", "P"]];
   const DISPOSITIONS = ["작업자", "매니저", "분위기메이커", "책임자", "연구자", "서포터"];
   const LEADER_DISPS = ["책임자", "매니저"];
+  const REQUIRED_DISPS = ["분위기메이커", "매니저", "책임자"];
+  const DISP_SUPPORTER = "서포터";
+  const FLAG_FIELDS = ["mental", "health", "sunk"];
+  const coversDisp = (m, r) => m.primary_disp === r || m.secondary_disp === r;
   const STRONG = 4, LEADERSHIP_TH = 2, HIGH_ISSUE = 2;
   const DISP_ALIASES = {
     "작업자": "작업자", "worker": "작업자", "실무자": "작업자",
@@ -79,6 +83,9 @@
         issue_level: pickNum(row, ["issue_level", "이슈강도", "이슈 강도"]) || 0,
         issue_note: pick(row, ["issue_note", "이슈비고", "이슈 비고", "비고"]),
         special: truthy(pick(row, ["special", "특수관리", "특수 관리", "특별관리", "특별", "tag"])),
+        mental: truthy(pick(row, ["mental", "멘탈이슈", "멘탈 이슈", "멘탈"])),
+        health: truthy(pick(row, ["health", "건강이슈", "건강 이슈", "건강"])),
+        sunk: truthy(pick(row, ["sunk", "매몰성향", "매몰 성향", "매몰"])),
         units,
       });
     });
@@ -160,7 +167,8 @@
   // ---- 점수화 ----
   const DEFAULT_WEIGHTS = {
     conflict: 100, positive: 8, special_stack: 500, issue_stack: 40, issue_balance: 10,
-    disp_diversity: 16, leader: 14, mbti_balance: 8,
+    flag_same: 60, flag_cross: 4, role_required: 25, role_supporter: 5,
+    disp_diversity: 10, leader: 14, mbti_balance: 8,
     competency_coverage: 8, competency_balance: 6,
     conflict_intensity: 1.0, positive_intensity: 0.5, competency_metric: "stdev",
     force_together: 1000, force_separate: 1000,
@@ -208,6 +216,18 @@
   function issueBalance(teams) { const tot = teams.map((t) => t.reduce((s, m) => s + (m.issue_level || 0), 0)); return tot.length >= 2 ? pstdev(tot) : 0; }
   function issueStacks(teams) { let e = 0; for (const t of teams) { const hi = t.filter(highIssue).length; if (hi > 1) e += hi - 1; } return e; }
   function specialStacks(teams) { let e = 0; for (const t of teams) { const sp = t.filter((m) => m.special).length; if (sp > 1) e += sp - 1; } return e; }
+  function flagSame(teams) { let e = 0; for (const t of teams) for (const f of FLAG_FIELDS) { const c = t.filter((m) => m[f]).length; if (c > 1) e += c - 1; } return e; }
+  function flagCross(teams) {
+    let e = 0;
+    for (const t of teams) {
+      const flagged = t.filter((m) => FLAG_FIELDS.some((f) => m[f])).length;
+      let same = 0; FLAG_FIELDS.forEach((f) => { const c = t.filter((m) => m[f]).length; same += c * (c - 1) / 2; });
+      e += Math.max(0, flagged * (flagged - 1) / 2 - same);
+    }
+    return e;
+  }
+  function roleMissing(teams) { let m = 0; for (const t of teams) { if (!t.length) continue; for (const r of REQUIRED_DISPS) if (!t.some((s) => coversDisp(s, r))) m++; } return m; }
+  function roleSupporterFrac(teams) { const ne = teams.filter((t) => t.length); if (!ne.length) return 0; return ne.filter((t) => t.some((s) => coversDisp(s, DISP_SUPPORTER))).length / ne.length; }
 
   function scorePartition(teams, graph, w, forceTogether, forceSeparate) {
     forceTogether = forceTogether || new Set();
@@ -227,9 +247,15 @@
     forceTogether.forEach((k) => { if (!sameTeam.has(k)) brokenTogether.push(k); });
     const stacks = issueStacks(teams);
     const spStacks = specialStacks(teams);
+    const fSame = flagSame(teams);
+    const roleMiss = roleMissing(teams);
     const parts = {
       conflict: -conflictPenalty, positive: +positiveBonus,
       special_stack: -w.special_stack * spStacks,
+      flag_same: -w.flag_same * fSame,
+      flag_cross: -w.flag_cross * flagCross(teams),
+      role_required: -w.role_required * roleMiss,
+      role_supporter: +w.role_supporter * roleSupporterFrac(teams),
       issue_stack: -w.issue_stack * stacks,
       issue_balance: -w.issue_balance * issueBalance(teams),
       disp_diversity: +w.disp_diversity * dispDiversity(teams),
@@ -241,7 +267,7 @@
       force_separate: -w.force_separate * violatedSeparate.length,
     };
     let total = 0; for (const k in parts) total += parts[k];
-    return { total, parts, intra, kept, brokenTogether, violatedSeparate, issueStacks: stacks, specialStacks: spStacks };
+    return { total, parts, intra, kept, brokenTogether, violatedSeparate, issueStacks: stacks, specialStacks: spStacks, flagSameStacks: fSame, roleMissing: roleMiss };
   }
 
   // ---- 시드 RNG ----
@@ -384,7 +410,7 @@
   global.TeamBuilder = {
     parseCSV, loadStudents, loadRelations, buildGraph, scorePartition, buildRecommendations,
     sizesFor, pairKey, pairsToSet, resolvePairs, validateConstraints, parsePairLines,
-    compValue, leaderCandidate, highIssue,
-    MBTI_AXES, DISPOSITIONS, DEFAULT_WEIGHTS,
+    compValue, leaderCandidate, highIssue, coversDisp,
+    MBTI_AXES, DISPOSITIONS, DEFAULT_WEIGHTS, REQUIRED_DISPS, FLAG_FIELDS, DISP_SUPPORTER,
   };
 })(window);

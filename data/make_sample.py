@@ -45,6 +45,9 @@ def generate(n, seed=7):
             "issue_level": 0,
             "issue_note": "",
             "special": "",
+            "mental": "",
+            "health": "",
+            "sunk": "",
             "단원1": rng.randint(1, 5),
             "단원2": rng.randint(1, 5),
             "단원3": rng.randint(1, 5),
@@ -62,6 +65,12 @@ def generate(n, seed=7):
     sp_idx = rng.sample(range(n), min(n_special, n))
     for i in sp_idx:
         students[i]["special"] = "Y"
+
+    # 소프트 카테고리 태그 주입 (각 팀 수보다 적게)
+    cats = {"mental": max(2, n // 10), "health": max(2, n // 12), "sunk": max(2, n // 12)}
+    for col, cnt in cats.items():
+        for i in rng.sample(range(n), min(cnt, n)):
+            students[i][col] = "Y"
 
     names = [s["name"] for s in students]
 
@@ -121,7 +130,8 @@ def write(out_dir, students, relations, meta):
     os.makedirs(out_dir, exist_ok=True)
     scols = ["id", "name", "leadership", "management", "planning",
              "execution", "communication", "primary_disp", "secondary_disp",
-             "mbti", "issue_level", "issue_note", "special", "단원1", "단원2", "단원3"]
+             "mbti", "issue_level", "issue_note", "special", "mental", "health",
+             "sunk", "단원1", "단원2", "단원3"]
     with open(os.path.join(out_dir, "students.csv"), "w", newline="",
               encoding="utf-8-sig") as fh:
         w = csv.DictWriter(fh, fieldnames=scols)

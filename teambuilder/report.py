@@ -14,6 +14,10 @@ PART_LABELS = {
     "conflict": "갈등 분리",
     "positive": "긍정 유지",
     "special_stack": "특수관리 격리",
+    "flag_same": "동일태그 격리",
+    "flag_cross": "교차태그 회피",
+    "role_required": "필수역할",
+    "role_supporter": "서포터 보너스",
     "issue_stack": "고이슈 격리",
     "issue_balance": "이슈 분산",
     "disp_diversity": "성향 다양성",
@@ -106,7 +110,8 @@ def write_csv(path: str, recs) -> None:
         w = csv.writer(fh)
         w.writerow(["option", "team", "id", "name", "mbti",
                     "primary_disp", "secondary_disp", "leadership",
-                    "comp_avg", "issue_level", "issue_note", "special", "leader_candidate"])
+                    "comp_avg", "issue_level", "issue_note", "special",
+                    "mental", "health", "sunk", "leader_candidate"])
         for oi, rec in enumerate(recs, start=1):
             for team in rec.teams:
                 for m in team.members:
@@ -118,5 +123,7 @@ def write_csv(path: str, recs) -> None:
                         "" if cv is None else round(cv, 2),
                         m.issue_level, m.issue_note,
                         "Y" if m.special else "",
+                        "Y" if m.mental else "", "Y" if m.health else "",
+                        "Y" if m.sunk else "",
                         "Y" if m.is_leader_candidate() else "",
                     ])

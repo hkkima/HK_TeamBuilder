@@ -82,6 +82,9 @@ def load_students(path: str) -> list[Student]:
                 issue_level=_f(row, "issue_level", "이슈강도", "이슈 강도") or 0.0,
                 issue_note=_s(row, "issue_note", "이슈비고", "이슈 비고", "비고"),
                 special=_truthy(_s(row, "special", "특수관리", "특수 관리", "특별관리", "특별", "tag")),
+                mental=_truthy(_s(row, "mental", "멘탈이슈", "멘탈 이슈", "멘탈")),
+                health=_truthy(_s(row, "health", "건강이슈", "건강 이슈", "건강")),
+                sunk=_truthy(_s(row, "sunk", "매몰성향", "매몰 성향", "매몰")),
                 units=units,
             ))
     if not students:

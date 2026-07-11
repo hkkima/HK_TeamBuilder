@@ -15,7 +15,8 @@ import statistics
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .models import (DISPOSITIONS, MBTI_AXES, STRONG_THRESHOLD, Student)
+from .models import (DISP_SUPPORTER, DISPOSITIONS, FLAG_CATEGORIES, MBTI_AXES,
+                     REQUIRED_DISPS, STRONG_THRESHOLD, Student)
 from .relationship import RelationshipGraph, _key
 
 
@@ -24,9 +25,13 @@ class Weights:
     conflict: float = 100.0
     positive: float = 8.0
     special_stack: float = 500.0     # 특수 관리 태그 2명↑ 같은 팀 (사실상 하드)
+    flag_same: float = 60.0          # 같은 카테고리(멘탈/건강/매몰) 2명↑ 같은 팀 (강한 소프트)
+    flag_cross: float = 4.0          # 서로 다른 카테고리 태그가 한 팀에 (약한 소프트)
+    role_required: float = 25.0      # 팀마다 분위기메이커·매니저·책임자 각 1명 (강한 소프트)
+    role_supporter: float = 5.0      # 팀에 서포터가 있으면 보너스
     issue_stack: float = 40.0        # 같은 팀 고이슈 2명↑ 1명당 페널티
     issue_balance: float = 10.0      # 팀 간 이슈 총량 표준편차 스케일
-    disp_diversity: float = 16.0     # 성향 다양성(0~1)
+    disp_diversity: float = 10.0     # 성향 다양성(0~1)
     leader: float = 14.0             # 팀별 리더 확보(0~1)
     mbti_balance: float = 8.0        # MBTI 균형(0~1)
     competency_coverage: float = 8.0  # 핵심역량 커버리지(0~1)
@@ -50,6 +55,8 @@ class ScoreBreakdown:
     violated_separate: list[tuple[str, str]] = field(default_factory=list)
     issue_stacks: int = 0
     special_stacks: int = 0
+    flag_same_stacks: int = 0
+    role_missing: int = 0
 
 
 def _mbti_balance(teams: list[list[Student]]) -> float:
@@ -139,6 +146,57 @@ def _special_stacks(teams: list[list[Student]]) -> int:
     return extra
 
 
+_FLAG_FIELDS = [f for f, _ in FLAG_CATEGORIES]
+
+
+def _flag_same(teams: list[list[Student]]) -> int:
+    """같은 카테고리(멘탈/건강/매몰) 태그가 한 팀에 2명 이상일 때 초과분 합계."""
+    extra = 0
+    for team in teams:
+        for f in _FLAG_FIELDS:
+            c = sum(1 for m in team if getattr(m, f))
+            if c > 1:
+                extra += c - 1
+    return extra
+
+
+def _flag_cross(teams: list[list[Student]]) -> int:
+    """한 팀 안에서 서로 다른 카테고리에 걸친 '서로 다른 두 학생' 쌍의 수 (약한 회피).
+    한 학생이 여러 태그를 가진 경우 자기 자신과의 쌍은 세지 않는다.
+    """
+    total = 0
+    for team in teams:
+        flagged = sum(1 for m in team if any(getattr(m, f) for f in _FLAG_FIELDS))
+        pairs = flagged * (flagged - 1) // 2
+        same = 0
+        for f in _FLAG_FIELDS:
+            c = sum(1 for m in team if getattr(m, f))
+            same += c * (c - 1) // 2
+        total += max(0, pairs - same)
+    return total
+
+
+def _role_required_missing(teams: list[list[Student]]) -> int:
+    """비어있지 않은 팀에서 필수 성향(분위기메이커·매니저·책임자) 미충족 수 합계."""
+    miss = 0
+    for team in teams:
+        if not team:
+            continue
+        for role in REQUIRED_DISPS:
+            if not any(m.covers_disp(role) for m in team):
+                miss += 1
+    return miss
+
+
+def _role_supporter_frac(teams: list[list[Student]]) -> float:
+    """서포터를 보유한 팀 비율 (0~1)."""
+    nonempty = [t for t in teams if t]
+    if not nonempty:
+        return 0.0
+    have = sum(1 for t in nonempty if any(m.covers_disp(DISP_SUPPORTER) for m in t))
+    return have / len(nonempty)
+
+
 def score_partition(
     teams: list[list[Student]],
     graph: RelationshipGraph,
@@ -177,11 +235,17 @@ def score_partition(
     broken_together = [k for k in force_together if k not in same_team]
     stacks = _issue_stacks(teams)
     sp_stacks = _special_stacks(teams)
+    flag_same = _flag_same(teams)
+    role_miss = _role_required_missing(teams)
 
     parts = {
         "conflict": -conflict_penalty,
         "positive": +positive_bonus,
         "special_stack": -weights.special_stack * sp_stacks,
+        "flag_same": -weights.flag_same * flag_same,
+        "flag_cross": -weights.flag_cross * _flag_cross(teams),
+        "role_required": -weights.role_required * role_miss,
+        "role_supporter": +weights.role_supporter * _role_supporter_frac(teams),
         "issue_stack": -weights.issue_stack * stacks,
         "issue_balance": -weights.issue_balance * _issue_balance(teams),
         "disp_diversity": +weights.disp_diversity * _disp_diversity(teams),
@@ -198,4 +262,5 @@ def score_partition(
         intra_conflicts=intra_conflicts, kept_positives=kept_positives,
         broken_together=broken_together, violated_separate=violated_separate,
         issue_stacks=stacks, special_stacks=sp_stacks,
+        flag_same_stacks=flag_same, role_missing=role_miss,
     )
