@@ -112,13 +112,15 @@ async function run() {
     // 특수 관리 태그: 자동 편성 시 절대 2명 이상 같은 팀 금지
     const spInfo = await pg.evaluate(() => { const p = Store.project(), b = Store.byId(); const tagged = p.students.filter((s) => s.special).length; const stack = p.board.teams.filter((t) => t.filter((id) => b.get(id).special).length > 1).length; return { tagged, stack }; });
     check(spInfo.tagged >= 2 && spInfo.stack === 0, `특수관리 태그 ${spInfo.tagged}명 → 팀당 최대 1명(하드)`);
-    // 카테고리 태그 격리(같은 카테고리 팀당 ≤1) + 필수 역할 커버
+    // 필수 역할 커버 + 성향 분포(핵심) + 카테고리 태그 미반영(가중치 0)
     const catRole = await pg.evaluate(() => { const p = Store.project(), b = Store.byId();
-      const catStack = ["mental", "sunk"].reduce((a, f) => a + p.board.teams.filter((t) => t.filter((id) => b.get(id)[f]).length > 1).length, 0);
       const roleMiss = p.board.teams.filter((t) => t.length).reduce((a, t) => a + TeamBuilder.REQUIRED_DISPS.filter((r) => !t.some((id) => TeamBuilder.coversDisp(b.get(id), r))).length, 0);
-      return { catStack, roleMiss }; });
-    check(catRole.catStack === 0, "동일 카테고리 태그 팀당 최대 1명");
+      const w = Store.weights();
+      const dispPart = TeamBuilder.scorePartition(p.board.teams.map((t) => t.map((id) => b.get(id))), Store.graph(), w).parts.disp_diversity;
+      return { roleMiss, flagOff: w.flag_same === 0 && w.flag_cross === 0, dispPart }; });
     check(catRole.roleMiss === 0, "팀마다 분위기메이커·매니저·책임자 각 1명");
+    check(catRole.flagOff, "카테고리 태그(멘탈/매몰) 자동 반영 안 함(가중치 0)");
+    check(catRole.dispPart > 0, "성향 분포(혼합도) 점수 반영");
     // 팀장/부팀장 지정 + 분위기메이커 확보
     const lead = await pg.evaluate(() => {
       const p = Store.project(), b = Store.byId();

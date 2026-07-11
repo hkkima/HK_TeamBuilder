@@ -229,12 +229,14 @@
   function moodMissing(teams) { let m = 0; for (const t of teams) { if (t.length && teamDisp(t, DISP_MOOD) < 1) m++; } return m; }
 
   // ---- 점수화 ----
+  // 핵심: ①갈등 분리(conflict) ②성향 분포(disp_diversity). 카테고리 태그(flag_*)는
+  // 운영자 확인용으로 자동 반영하지 않음(가중치 0).
   const DEFAULT_WEIGHTS = {
-    conflict: 100, positive: 8, special_stack: 500, issue_stack: 40, issue_balance: 10,
-    flag_same: 60, flag_cross: 4, role_required: 25, role_supporter: 5,
+    conflict: 100, positive: 5, special_stack: 500, issue_stack: 40, issue_balance: 6,
+    flag_same: 0, flag_cross: 0, role_required: 25, role_supporter: 5,
     leader_pair: 35, mood_cover: 22,
-    disp_diversity: 10, leader: 14, mbti_balance: 8,
-    competency_coverage: 8, competency_balance: 6,
+    disp_diversity: 45, leader: 14, mbti_balance: 5,
+    competency_coverage: 6, competency_balance: 3,
     conflict_intensity: 1.0, positive_intensity: 0.5, competency_metric: "stdev",
     force_together: 1000, force_separate: 1000,
   };
@@ -251,13 +253,19 @@
     }
     return scores.length ? scores.reduce((s, v) => s + v, 0) / scores.length : 0;
   }
+  // 성향 분포(혼합도): 팀 내 멤버 쌍 중 '주 성향이 다른' 쌍의 비율(0~1) 평균.
+  // 같은 성향이 몰릴수록 같은-성향 쌍이 급증 → 볼록 페널티로 골고루 분산 선호.
   function dispDiversity(teams) {
     const scores = [];
     for (const t of teams) {
-      const s = new Set();
-      t.forEach((m) => { [m.primary_disp, m.secondary_disp].forEach((d) => { if (DISPOSITIONS.includes(d)) s.add(d); }); });
-      const cap = Math.min(DISPOSITIONS.length, t.length);
-      if (cap) scores.push(Math.min(s.size, cap) / cap);
+      const n = t.length;
+      if (n < 2) { if (n === 1) scores.push(1); continue; }
+      const total = n * (n - 1) / 2;
+      const counts = {}; let known = 0;
+      t.forEach((m) => { if (DISPOSITIONS.includes(m.primary_disp)) { counts[m.primary_disp] = (counts[m.primary_disp] || 0) + 1; known++; } });
+      let same = 0; Object.values(counts).forEach((c) => { same += c * (c - 1) / 2; });
+      const unknown = n - known; same += unknown * (unknown - 1) / 2;
+      scores.push(Math.max(0, (total - same) / total));
     }
     return scores.length ? scores.reduce((s, v) => s + v, 0) / scores.length : 0;
   }

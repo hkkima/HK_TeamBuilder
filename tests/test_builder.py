@@ -11,6 +11,7 @@ from teambuilder.builder import build_recommendations, sizes_for  # noqa: E402
 from teambuilder.loader import (build_resolver, load_grades,  # noqa: E402
                                 load_relations, load_students)
 from teambuilder.relationship import build_relationship_graph  # noqa: E402
+from teambuilder.scoring import Weights  # noqa: E402
 
 
 def _load(n=23, seed=7):
@@ -106,19 +107,18 @@ def test_special_tag():
     print("ok: 특수 태그 팀당 최대 1명 + 초과 예외")
 
 
-def test_flags_and_roles():
+def test_roles_and_disposition():
     students, graph, _ = _load()
-    n_teams = 4
-    recs = build_recommendations(students, graph, teams=n_teams, n_options=1, restarts=60)
+    recs = build_recommendations(students, graph, teams=4, n_options=1, restarts=60)
     top = recs[0]
-    # 같은 카테고리 태그는 한 팀에 2명 이상 없어야 (샘플은 태그 수 ≤ 팀수라 가능)
-    for f in ("mental", "sunk"):
-        for t in top.teams:
-            assert sum(1 for m in t.members if getattr(m, f)) <= 1, f"{f} 겹침"
-    assert top.score.flag_same_stacks == 0
     # 필수 역할(분위기메이커·매니저·책임자) 미충족이 최소화되어야
     assert top.score.role_missing == 0, f"필수 역할 미충족 {top.score.role_missing}"
-    print("ok: 카테고리 격리 + 필수 역할 커버")
+    # 카테고리 태그(멘탈/매몰)는 자동 편성에 반영하지 않음(운영자 확인용) — 가중치 0
+    w = Weights()
+    assert w.flag_same == 0 and w.flag_cross == 0, "카테고리 태그 가중치는 0이어야"
+    # 성향 분포(혼합도)가 점수에 실질 반영(보너스 > 0)
+    assert top.score.parts["disp_diversity"] > 0, top.score.parts["disp_diversity"]
+    print("ok: 필수 역할 + 성향 분포(카테고리 태그 미반영)")
 
 
 def test_pins():
@@ -179,7 +179,7 @@ if __name__ == "__main__":
     test_forced_constraints()
     test_name_resolution()
     test_special_tag()
-    test_flags_and_roles()
+    test_roles_and_disposition()
     test_pins()
     test_leader_pair_and_mood()
     test_options_distinct()

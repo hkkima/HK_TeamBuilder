@@ -23,22 +23,23 @@ from .relationship import RelationshipGraph, _key
 
 @dataclass
 class Weights:
-    conflict: float = 100.0
-    positive: float = 8.0
+    # 핵심: ①갈등 분리 ②성향 분포. (실사용 피드백 반영)
+    conflict: float = 100.0          # 갈등 분리 (사실상 하드) — 핵심 ①
+    positive: float = 5.0            # 긍정 유지 (성향 분포보다 낮게)
     special_stack: float = 500.0     # 특수 관리 태그 2명↑ 같은 팀 (사실상 하드)
-    flag_same: float = 60.0          # 같은 카테고리(멘탈/매몰) 2명↑ 같은 팀 (강한 소프트)
-    flag_cross: float = 4.0          # 서로 다른 카테고리 태그가 한 팀에 (약한 소프트)
+    flag_same: float = 0.0           # 카테고리(멘탈/매몰) 격리 — 운영자 확인용, 자동 반영 안 함
+    flag_cross: float = 0.0          # 카테고리 교차 — 운영자 확인용, 자동 반영 안 함
     role_required: float = 25.0      # 팀마다 분위기메이커·매니저·책임자 각 1명 (강한 소프트)
     role_supporter: float = 5.0      # 팀에 서포터가 있으면 보너스
     leader_pair: float = 35.0        # 팀장+부팀장 쌍이 책임자≥1·매니저≥1 커버 (강한 소프트)
     mood_cover: float = 22.0         # 팀 분위기메이커 점수(주1/부0.5)≥1 (강한 소프트)
     issue_stack: float = 40.0        # 같은 팀 고이슈 2명↑ 1명당 페널티
-    issue_balance: float = 10.0      # 팀 간 이슈 총량 표준편차 스케일
-    disp_diversity: float = 10.0     # 성향 다양성(0~1)
+    issue_balance: float = 6.0       # 팀 간 이슈 총량 표준편차 스케일
+    disp_diversity: float = 45.0     # 성향 분포(혼합도, 0~1) — 핵심 ②
     leader: float = 14.0             # 팀별 리더 확보(0~1)
-    mbti_balance: float = 8.0        # MBTI 균형(0~1)
-    competency_coverage: float = 8.0  # 핵심역량 커버리지(0~1)
-    competency_balance: float = 6.0  # 역량 평준화(보조)
+    mbti_balance: float = 5.0        # MBTI 균형(0~1, 보조)
+    competency_coverage: float = 6.0  # 핵심역량 커버리지(0~1, 보조)
+    competency_balance: float = 3.0  # 역량 평준화(보조)
 
     conflict_intensity: float = 1.0
     positive_intensity: float = 0.5
@@ -79,17 +80,27 @@ def _mbti_balance(teams: list[list[Student]]) -> float:
 
 
 def _disp_diversity(teams: list[list[Student]]) -> float:
+    """성향 분포(혼합도): 팀별 '서로 다른 주 성향'을 가진 멤버 쌍의 비율 (0~1) 평균.
+
+    팀 안의 모든 멤버 쌍 중 주 성향이 다른 쌍의 비율. 같은 성향이 한 팀에
+    많이 몰릴수록(예: 작업자 4명) 같은-성향 쌍이 급증해 점수가 크게 낮아진다
+    (볼록 페널티 → 골고루 분산 선호). 부 성향은 세지 않아 변별력을 유지.
+    """
+    from collections import Counter
     scores = []
-    target = len(DISPOSITIONS)
     for team in teams:
-        s: set[str] = set()
-        for m in team:
-            for d in (m.primary_disp, m.secondary_disp):
-                if d in DISPOSITIONS:
-                    s.add(d)
-        cap = min(target, len(team))
-        if cap:
-            scores.append(min(len(s), cap) / cap)
+        n = len(team)
+        if n < 2:
+            if n == 1:
+                scores.append(1.0)
+            continue
+        total_pairs = n * (n - 1) / 2
+        counts = Counter(m.primary_disp for m in team if m.primary_disp in DISPOSITIONS)
+        same_pairs = sum(c * (c - 1) / 2 for c in counts.values())
+        # 성향 미상 멤버끼리/미상-기타 쌍은 same도 diff도 아님 → total에서 제외
+        unknown = n - sum(counts.values())
+        same_pairs += unknown * (unknown - 1) / 2  # 미상끼리는 '같은 것 취급'(다양성 아님)
+        scores.append(max(0.0, (total_pairs - same_pairs) / total_pairs))
     return sum(scores) / len(scores) if scores else 0.0
 
 

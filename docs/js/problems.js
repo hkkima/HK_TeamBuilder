@@ -39,13 +39,13 @@
       if (t.length && !t.some((id) => byId.get(id) && TB.leaderCandidate(byId.get(id))))
         probs.push({ type: "leader", teams: [ti], ids: [], label: `팀 ${ti + 1} 리더 후보 없음`, sev: 1, fixable: true });
     });
-    // 같은 카테고리 태그(멘탈/매몰) 2명↑ 겹침
+    // 같은 카테고리 태그(멘탈/매몰) 2명↑ 겹침 — 운영자 확인용(자동 편성엔 미반영)
     const CATLBL = { mental: "멘탈", sunk: "매몰" };
     TB.FLAG_FIELDS.forEach((cat) => {
       board.teams.forEach((t, ti) => {
         const c = t.filter((id) => byId.get(id) && byId.get(id)[cat]);
         if (c.length > 1) probs.push({ type: "flag", cat, teams: [ti], ids: c,
-          label: `팀 ${ti + 1} ${CATLBL[cat]} 이슈 ${c.length}명 겹침`, sev: 2, fixable: true });
+          label: `팀 ${ti + 1} ${CATLBL[cat]} ${c.length}명(운영자 확인)`, sev: 1, fixable: true });
       });
     });
     // 필수 역할 미충족 (분위기메이커·매니저·책임자)

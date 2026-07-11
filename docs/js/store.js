@@ -9,7 +9,7 @@
 
   function defaultSettings() {
     return { mode: "teams", teams: 4, sizes: "6,6,6,5", options: 3, restarts: 80, seed: 42,
-      weights: Object.assign({}, TB.DEFAULT_WEIGHTS) };
+      weightsVersion: 2, weights: Object.assign({}, TB.DEFAULT_WEIGHTS) };
   }
   function emptyProject(name) {
     return { id: uid(), name: name || "새 프로젝트", updatedAt: Date.now(),
@@ -51,6 +51,15 @@
     p.pins = p.pins || {};
     p.settings = Object.assign(defaultSettings(), p.settings || {});
     p.settings.weights = Object.assign({}, TB.DEFAULT_WEIGHTS, p.settings.weights || {});
+    // 가중치 모델 v2: 성향 분포 강화 + 카테고리 태그(flag_*) 자동 반영 제거.
+    // 알고리즘 기본 키를 새 기본값으로 1회 초기화(성향 분포 metric 의미가 바뀜).
+    if (p.settings.weightsVersion !== 2) {
+      ["flag_same", "flag_cross", "disp_diversity", "positive", "issue_balance",
+        "mbti_balance", "competency_coverage", "competency_balance"].forEach((k) => {
+        p.settings.weights[k] = TB.DEFAULT_WEIGHTS[k];
+      });
+      p.settings.weightsVersion = 2;
+    }
     p.board = p.board || { teams: [], pool: [], notes: [], leaderByTeam: [], deputyByTeam: [], teamNames: [] };
     p.board.teamNames = p.board.teamNames || p.board.teams.map((_, i) => "팀 " + (i + 1));
     p.board.deputyByTeam = p.board.deputyByTeam || p.board.teams.map(() => null);

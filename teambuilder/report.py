@@ -113,7 +113,8 @@ def render_report(recs, graph: RelationshipGraph, *, n_students: int) -> str:
         f"(갈등 {len(graph.conflicts)} · 긍정 {len(graph.positives)})",
         f"- 추천안 수: {len(recs)}개",
         "",
-        "> 우선순위: ①갈등 분리 ②긍정 유지 ③이슈 관리 ④성향/리더 ⑤역량(보조)",
+        "> 우선순위: ①갈등 분리 ②성향 분포 ③이슈/필수역할 ④긍정·MBTI ⑤역량(보조)"
+        "  · 카테고리 태그(멘탈/매몰)는 운영자 확인용(자동 편성 미반영)",
         "", "---", "",
     ]
     body = "\n---\n\n".join(
