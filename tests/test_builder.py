@@ -8,16 +8,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data.make_sample import generate, write  # noqa: E402
 from teambuilder.builder import build_recommendations, sizes_for  # noqa: E402
-from teambuilder.loader import (build_resolver, load_relations,  # noqa: E402
-                                load_students)
+from teambuilder.loader import (build_resolver, load_grades,  # noqa: E402
+                                load_relations, load_students)
 from teambuilder.relationship import build_relationship_graph  # noqa: E402
 
 
 def _load(n=23, seed=7):
     d = tempfile.mkdtemp()
-    s, r, meta = generate(n, seed)
-    write(d, s, r, meta)
+    s, r, gr, meta = generate(n, seed)
+    write(d, s, r, gr, meta)
     students = load_students(os.path.join(d, "students.csv"))
+    load_grades(os.path.join(d, "grades.csv"), students)
     relations = load_relations(os.path.join(d, "relations.csv"), students)
     graph = build_relationship_graph(students, relations)
     return students, graph, meta
@@ -111,7 +112,7 @@ def test_flags_and_roles():
     recs = build_recommendations(students, graph, teams=n_teams, n_options=1, restarts=60)
     top = recs[0]
     # 같은 카테고리 태그는 한 팀에 2명 이상 없어야 (샘플은 태그 수 ≤ 팀수라 가능)
-    for f in ("mental", "health", "sunk"):
+    for f in ("mental", "sunk"):
         for t in top.teams:
             assert sum(1 for m in t.members if getattr(m, f)) <= 1, f"{f} 겹침"
     assert top.score.flag_same_stacks == 0

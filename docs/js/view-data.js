@@ -12,7 +12,8 @@
   const L3 = [["", "–"], ["3", "상"], ["2", "중"], ["1", "하"]];
   const L5 = [["", "–"], ["5", "매우 우수"], ["4", "우수"], ["3", "보통"], ["2", "미흡"], ["1", "매우 미흡"]];
   const ORD = { leadership: L3, management: L3, planning: L5, execution: L5, communication: L5 };
-  const CATS = [["mental", "멘탈"], ["health", "건강"], ["sunk", "매몰"]];
+  // 플래그 열 순서(스키마): 멘탈, 매몰, 관리대상(=special)
+  const FLAGS = [["mental", "멘탈"], ["sunk", "매몰"], ["special", "관리대상"]];
 
   function newId(students) { let i = students.length + 1; const used = new Set(students.map((s) => s.id)); while (used.has("S" + String(i).padStart(2, "0"))) i++; return "S" + String(i).padStart(2, "0"); }
 
@@ -27,6 +28,7 @@
         <span class="grow"></span>
         <button class="ghost sm" data-act="tmpl-s">학생 템플릿</button>
         <button class="ghost sm" data-act="tmpl-r">관계 템플릿</button>
+        <button class="ghost sm" data-act="tmpl-g">교과 템플릿</button>
         <button class="ghost sm" data-act="exp-s">학생 CSV</button>
         <button class="ghost sm" data-act="exp-r">관계 CSV</button>
         <input type="file" id="dfile" accept=".csv" hidden />
@@ -45,20 +47,21 @@
     const dsel = (id, col, val) => `<select data-id="${id}" data-col="${col}"><option value="">–</option>${TB.DISPOSITIONS.map((d) => `<option${d === val ? " selected" : ""}>${d}</option>`).join("")}</select>`;
     const osel = (id, col, val) => { const cur = val == null ? "" : String(val); return `<select class="cell ord" data-id="${id}" data-col="${col}">${ORD[col].map(([v, lb]) => `<option value="${v}"${v === cur ? " selected" : ""}>${lb}</option>`).join("")}</select>`; };
     const chk = (id, col, on, title) => `<td class="ctr"><input type="checkbox" data-id="${id}" data-col="${col}"${on ? " checked" : ""} title="${title}" /></td>`;
-    const rows = p.students.map((s) => `<tr>
+    const flagTitle = { mental: "멘탈 이슈(카테고리)", sunk: "매몰 성향(카테고리)", special: "관리 대상 — 한 팀 2명 금지(하드)" };
+    const rows = p.students.map((s) => { const cv = TB.compValue(s); return `<tr>
       <td><input class="cell name" data-id="${s.id}" data-col="name" value="${esc(s.name)}" /></td>
       ${COLS.map(([c]) => `<td>${osel(s.id, c, s[c])}</td>`).join("")}
+      <td class="ctr grade">${cv == null ? "–" : cv.toFixed(1)}</td>
       <td>${dsel(s.id, "primary_disp", s.primary_disp)}</td>
       <td>${dsel(s.id, "secondary_disp", s.secondary_disp)}</td>
       <td><input class="cell mbti" data-id="${s.id}" data-col="mbti" value="${esc(s.mbti)}" maxlength="4" /></td>
       <td><input class="cell num" type="number" min="0" max="3" data-id="${s.id}" data-col="issue_level" value="${s.issue_level || 0}" /></td>
       <td><input class="cell note" data-id="${s.id}" data-col="issue_note" value="${esc(s.issue_note)}" /></td>
-      ${chk(s.id, "special", s.special, "특수 관리(한 팀 2명 금지·하드)")}
-      ${CATS.map(([c]) => chk(s.id, c, s[c], c)).join("")}
-      <td><button class="mini del" data-delstu="${s.id}" title="삭제">✕</button></td></tr>`).join("");
+      ${FLAGS.map(([c]) => chk(s.id, c, s[c], flagTitle[c])).join("")}
+      <td><button class="mini del" data-delstu="${s.id}" title="삭제">✕</button></td></tr>`; }).join("");
     return `<div class="table-scroll"><table class="grid"><thead><tr>
-      <th>이름</th><th>리더십</th><th>관리</th><th>기획</th><th>작업</th><th>소통</th><th>주성향</th><th>부성향</th><th>MBTI</th><th>이슈</th><th>비고</th>
-      <th title="한 팀 2명 금지(하드)">특별</th><th>멘탈</th><th>건강</th><th>매몰</th><th></th>
+      <th>이름</th><th>리더십</th><th>관리</th><th>기획</th><th>작업</th><th>소통</th><th title="교과 단원 평균(자동)">교과평균</th><th>주성향</th><th>부성향</th><th>MBTI</th><th>이슈</th><th>비고</th>
+      <th>멘탈</th><th>매몰</th><th title="한 팀 2명 금지(하드)">관리대상</th><th></th>
       </tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
@@ -88,12 +91,13 @@
   }
 
   // ---- CSV ----
-  const STUDENTS_TEMPLATE = "id,name,leadership,management,planning,execution,communication,primary_disp,secondary_disp,mbti,issue_level,issue_note,special,mental,health,sunk,단원1,단원2,단원3\nS01,김규장,1,2,4,4,2,작업자,연구자,INTP,1,불안형,Y,Y,,,3,4,3\nS02,김민성,2,3,2,4,3,매니저,연구자,ESTJ,,,,,,,4,4,5\n";
+  const STUDENTS_TEMPLATE = "id,name,leadership,management,planning,execution,communication,primary_disp,secondary_disp,mbti,issue_level,issue_note,mental,sunk,special\nS01,김규장,1,2,4,4,2,작업자,연구원,INTP,1,불안형 / 에고가 강한 편,Y,,Y\nS02,김민성,2,3,2,4,3,매니저,연구원,ESTJ,,,,,\n";
+  const GRADES_TEMPLATE = "INDEX,이름,평균,1단원,2단원,3단원,4단원\n1,김규장,76.3,75,77,75,78\n2,김민성,73.5,63,70,88,73\n";
   const RELATIONS_TEMPLATE = "DATE,FROM,TO,TYPE,W,NOTE\n2026-06-10,김규장,이제희,NEG,3,소통이 전혀 되지 않음\n2026-07-09,윤희성,박송호,POS,3,함께하고 싶은 팀원\n";
 
   function exportStudents(p) {
     const unitCols = Array.from(new Set(p.students.flatMap((s) => Object.keys(s.units || {}))));
-    const boolCols = ["special", "mental", "health", "sunk"];
+    const boolCols = ["special", "mental", "sunk"];
     const head = ["id", "name", ...COLS.map((c) => c[0]), "primary_disp", "secondary_disp", "mbti", "issue_level", "issue_note", ...boolCols, ...unitCols];
     const lines = [head.join(",")].concat(p.students.map((s) => head.map((h) => {
       let v = boolCols.includes(h) ? (s[h] ? "Y" : "") : (h in (s.units || {}) ? s.units[h] : s[h]); v = v == null ? "" : v;
@@ -113,6 +117,7 @@
     const p = Store.project();
     try {
       if (kind === "relations") { const rels = TB.loadRelations(text, p.students); Store.setRelations(rels); global.UI.toast(`관계 ${rels.length}건 가져옴`); return; }
+      if (kind === "grades") { if (!p.students.length) return global.UI.toast("먼저 수강생을 불러오세요", "bad"); const g = TB.parseGrades(text, p.students); Store.applyGrades(g); global.UI.toast(`교과 점수 ${g.length}명 반영`); return; }
       const students = TB.loadStudents(text);
       // 새 학생 집합에 여전히 유효한 기존 관계만 유지
       const ids = new Set(students.map((s) => s.id));
@@ -127,7 +132,8 @@
       const text = r.result;
       const head = (text.split(/\r?\n/)[0] || "").toLowerCase();
       const isRel = /from/.test(head) && /to/.test(head) && /type/.test(head);
-      importText(text, isRel ? "relations" : "students");
+      const isGrade = (head.indexOf("단원") >= 0 || /unit|chapter/.test(head)) && !/leadership|주성향|primary_disp/.test(head);
+      importText(text, isRel ? "relations" : (isGrade ? "grades" : "students"));
     };
     r.readAsText(file, "utf-8");
   }
@@ -140,13 +146,14 @@
     if (b.dataset.delrel != null) return Store.deleteRelation(Number(b.dataset.delrel));
     if (b.dataset.delcon != null) { const [k, i] = b.dataset.delcon.split(":"); const arr = p.constraints[k].slice(); arr.splice(Number(i), 1); const c = Object.assign({}, p.constraints); c[k] = arr; return Store.setConstraints(c); }
     const act = b.dataset.act;
-    if (act === "sample") { const students = TB.loadStudents(global.SAMPLE_STUDENTS); const rels = TB.loadRelations(global.SAMPLE_RELATIONS, students); Store.loadData(students, rels); global.UI.toast("샘플 불러옴"); return; }
+    if (act === "sample") { const students = TB.loadStudents(global.SAMPLE_STUDENTS); const rels = TB.loadRelations(global.SAMPLE_RELATIONS, students); if (global.SAMPLE_GRADES) TB.parseGrades(global.SAMPLE_GRADES, students).forEach((g) => { const st = students.find((x) => x.id === g.id); if (st) st.units = g.units; }); Store.loadData(students, rels); global.UI.toast("샘플 불러옴"); return; }
     if (act === "import") return root.querySelector("#dfile").click();
-    if (act === "add-student") { const s = { id: newId(p.students), name: "새 수강생", leadership: null, management: null, planning: null, execution: null, communication: null, primary_disp: null, secondary_disp: null, mbti: "", issue_level: 0, issue_note: "", special: false, mental: false, health: false, sunk: false, units: {} }; return Store.addStudent(s); }
+    if (act === "add-student") { const s = { id: newId(p.students), name: "새 수강생", leadership: null, management: null, planning: null, execution: null, communication: null, primary_disp: null, secondary_disp: null, mbti: "", issue_level: 0, issue_note: "", special: false, mental: false, sunk: false, units: {} }; return Store.addStudent(s); }
     if (act === "add-rel") { if (!p.students.length) return global.UI.toast("먼저 수강생을 추가하세요", "bad"); return Store.addRelation({ src: p.students[0].id, dst: p.students[Math.min(1, p.students.length - 1)].id, positive: false, weight: 1, note: "" }); }
     if (act === "add-together" || act === "add-apart") { const k = act === "add-together" ? "together" : "apart"; if (p.students.length < 2) return global.UI.toast("수강생 2명 이상 필요", "bad"); const c = Object.assign({}, p.constraints); c[k] = c[k].concat([[p.students[0].id, p.students[1].id]]); return Store.setConstraints(c); }
     if (act === "tmpl-s") return global.UI.download("students_template.csv", "﻿" + STUDENTS_TEMPLATE, "text/csv");
     if (act === "tmpl-r") return global.UI.download("relations_template.csv", "﻿" + RELATIONS_TEMPLATE, "text/csv");
+    if (act === "tmpl-g") return global.UI.download("grades_template.csv", "﻿" + GRADES_TEMPLATE, "text/csv");
     if (act === "exp-s") return exportStudents(p);
     if (act === "exp-r") return exportRelations(p);
   }

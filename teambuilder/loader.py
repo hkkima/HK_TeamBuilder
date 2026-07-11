@@ -81,9 +81,9 @@ def load_students(path: str) -> list[Student]:
                 mbti=_s(row, "mbti", "MBTI").upper(),
                 issue_level=_f(row, "issue_level", "이슈강도", "이슈 강도") or 0.0,
                 issue_note=_s(row, "issue_note", "이슈비고", "이슈 비고", "비고"),
-                special=_truthy(_s(row, "special", "특수관리", "특수 관리", "특별관리", "특별", "tag")),
+                special=_truthy(_s(row, "special", "관리대상", "관리 대상", "특수관리",
+                                   "특수 관리", "특별관리", "특별", "tag")),
                 mental=_truthy(_s(row, "mental", "멘탈이슈", "멘탈 이슈", "멘탈")),
-                health=_truthy(_s(row, "health", "건강이슈", "건강 이슈", "건강")),
                 sunk=_truthy(_s(row, "sunk", "매몰성향", "매몰 성향", "매몰")),
                 units=units,
             ))
@@ -182,3 +182,34 @@ def load_constraints(path: str, students: list[Student]):
                 raise ValueError(f"알 수 없는 제약 유형 '{_s(row, 'type')}' (line {ln})")
             (together if t == "together" else apart).add(_ckey(ra, rb))
     return together, apart
+
+
+def load_grades(path: str, students: list[Student]) -> int:
+    """교과 점수(단원별) 별도 CSV를 로딩해 학생 units에 병합.
+
+    형식: 이름(또는 INDEX/id) + '단원'/'unit' 포함 컬럼들 (60~100 권장).
+    이름으로 매칭(중복 시 id 필요). 매칭된 학생 수 반환.
+    """
+    resolve = build_resolver(students)
+    by_id = {s.id: s for s in students}
+    merged = 0
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        reader = csv.DictReader(fh)
+        unit_cols = _unit_columns(reader.fieldnames)
+        for row in reader:
+            tok = _s(row, "name", "이름", "id", "INDEX", "index")
+            if not tok:
+                continue
+            try:
+                sid = resolve(tok)
+            except ValueError:
+                continue  # 매칭 안 되면 skip
+            units = {}
+            for c in unit_cols:
+                v = _f(row, c)
+                if v is not None:
+                    units[c] = v
+            if units:
+                by_id[sid].units = units
+                merged += 1
+    return merged

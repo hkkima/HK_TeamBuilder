@@ -82,10 +82,11 @@ async function run() {
     await pg.fill(`.cell[data-id="${firstId}"][data-col="name"]`, "테스트수강생");
     await pg.locator(`.cell[data-id="${firstId}"][data-col="name"]`).blur();
     check(await pg.evaluate((id) => Store.project().students.find((s) => s.id === id).name === "테스트수강생", firstId), "인라인 이름 편집 반영");
+    check(await pg.evaluate(() => { const s = Store.project().students.find((x) => Object.keys(x.units || {}).length); return !!s && Object.values(s.units).some((v) => v >= 60); }), "샘플 교과 점수(단원) 반영");
     const beforeN = await pg.evaluate(() => Store.project().students.length);
     await pg.click('[data-act="add-student"]');
     check(await pg.evaluate((n) => Store.project().students.length === n + 1, beforeN), "＋학생 추가");
-    await pg.click(`[data-delstu]`); // 첫 삭제 버튼
+    await pg.locator("[data-delstu]").last().click(); // 방금 추가한 학생 삭제(샘플 보존)
     check(await pg.evaluate((n) => Store.project().students.length === n, beforeN), "학생 삭제");
     check(await pg.evaluate(() => { const s = document.querySelector(".cell.ord"); return s && s.tagName === "SELECT" && [...s.options].some((o) => o.text === "상" || o.text === "매우 우수"); }), "역량 서수 드롭다운(상/중/하·매우우수~)");
 
@@ -113,7 +114,7 @@ async function run() {
     check(spInfo.tagged >= 2 && spInfo.stack === 0, `특수관리 태그 ${spInfo.tagged}명 → 팀당 최대 1명(하드)`);
     // 카테고리 태그 격리(같은 카테고리 팀당 ≤1) + 필수 역할 커버
     const catRole = await pg.evaluate(() => { const p = Store.project(), b = Store.byId();
-      const catStack = ["mental", "health", "sunk"].reduce((a, f) => a + p.board.teams.filter((t) => t.filter((id) => b.get(id)[f]).length > 1).length, 0);
+      const catStack = ["mental", "sunk"].reduce((a, f) => a + p.board.teams.filter((t) => t.filter((id) => b.get(id)[f]).length > 1).length, 0);
       const roleMiss = p.board.teams.filter((t) => t.length).reduce((a, t) => a + TeamBuilder.REQUIRED_DISPS.filter((r) => !t.some((id) => TeamBuilder.coversDisp(b.get(id), r))).length, 0);
       return { catStack, roleMiss }; });
     check(catRole.catStack === 0, "동일 카테고리 태그 팀당 최대 1명");

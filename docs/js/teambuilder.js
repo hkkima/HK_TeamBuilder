@@ -4,11 +4,11 @@
   "use strict";
 
   const MBTI_AXES = [["E", "I"], ["N", "S"], ["T", "F"], ["J", "P"]];
-  const DISPOSITIONS = ["작업자", "매니저", "분위기메이커", "책임자", "연구자", "서포터"];
+  const DISPOSITIONS = ["작업자", "매니저", "분위기메이커", "책임자", "연구원", "서포터"];
   const LEADER_DISPS = ["책임자", "매니저"];
   const REQUIRED_DISPS = ["분위기메이커", "매니저", "책임자"];
   const DISP_SUPPORTER = "서포터";
-  const FLAG_FIELDS = ["mental", "health", "sunk"];
+  const FLAG_FIELDS = ["mental", "sunk"];
   const coversDisp = (m, r) => m.primary_disp === r || m.secondary_disp === r;
   const STRONG = 4, LEADERSHIP_TH = 2, HIGH_ISSUE = 2;
   const DISP_ALIASES = {
@@ -16,7 +16,7 @@
     "매니저": "매니저", "manager": "매니저", "관리자": "매니저",
     "분위기메이커": "분위기메이커", "분위기": "분위기메이커", "mood": "분위기메이커", "moodmaker": "분위기메이커", "윤활유": "분위기메이커",
     "책임자": "책임자", "owner": "책임자", "리더": "책임자", "leader": "책임자",
-    "연구자": "연구자", "researcher": "연구자", "분석가": "연구자",
+    "연구원": "연구원", "연구자": "연구원", "researcher": "연구원", "분석가": "연구원",
     "서포터": "서포터", "supporter": "서포터", "조력자": "서포터",
   };
   function normalizeDisp(raw) {
@@ -82,9 +82,8 @@
         mbti: pick(row, ["mbti", "MBTI"]).toUpperCase(),
         issue_level: pickNum(row, ["issue_level", "이슈강도", "이슈 강도"]) || 0,
         issue_note: pick(row, ["issue_note", "이슈비고", "이슈 비고", "비고"]),
-        special: truthy(pick(row, ["special", "특수관리", "특수 관리", "특별관리", "특별", "tag"])),
+        special: truthy(pick(row, ["special", "관리대상", "관리 대상", "특수관리", "특수 관리", "특별관리", "특별", "tag"])),
         mental: truthy(pick(row, ["mental", "멘탈이슈", "멘탈 이슈", "멘탈"])),
-        health: truthy(pick(row, ["health", "건강이슈", "건강 이슈", "건강"])),
         sunk: truthy(pick(row, ["sunk", "매몰성향", "매몰 성향", "매몰"])),
         units,
       });
@@ -109,6 +108,24 @@
 
   const POSSET = new Set(["pos", "positive", "긍정", "+", "p"]);
   const NEGSET = new Set(["neg", "negative", "부정", "-", "n"]);
+
+  // 교과 점수 별도 CSV → [{id, units}] (이름/ id 로 매칭, '단원'/'unit' 컬럼)
+  function parseGrades(text, students) {
+    const rows = parseCSV(text);
+    if (!rows.length) return [];
+    const unitCols = Object.keys(rows[0]).filter((h) => h && (h.indexOf("단원") >= 0 || /^unit|^chapter/i.test(h)));
+    const resolve = buildResolver(students);
+    const out = [];
+    rows.forEach((row) => {
+      const tok = pick(row, ["name", "이름", "id", "INDEX", "index"]);
+      if (!tok) return;
+      let id; try { id = resolve(tok); } catch (e) { return; }
+      const units = {};
+      unitCols.forEach((c) => { const v = pickNum(row, [c]); if (v != null) units[c] = v; });
+      if (Object.keys(units).length) out.push({ id, units });
+    });
+    return out;
+  }
 
   function loadRelations(text, students) {
     const resolve = buildResolver(students);
@@ -408,7 +425,7 @@
   }
 
   global.TeamBuilder = {
-    parseCSV, loadStudents, loadRelations, buildGraph, scorePartition, buildRecommendations,
+    parseCSV, loadStudents, loadRelations, parseGrades, buildGraph, scorePartition, buildRecommendations,
     sizesFor, pairKey, pairsToSet, resolvePairs, validateConstraints, parsePairLines,
     compValue, leaderCandidate, highIssue, coversDisp,
     MBTI_AXES, DISPOSITIONS, DEFAULT_WEIGHTS, REQUIRED_DISPS, FLAG_FIELDS, DISP_SUPPORTER,

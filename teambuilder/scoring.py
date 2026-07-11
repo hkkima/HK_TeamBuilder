@@ -25,7 +25,7 @@ class Weights:
     conflict: float = 100.0
     positive: float = 8.0
     special_stack: float = 500.0     # 특수 관리 태그 2명↑ 같은 팀 (사실상 하드)
-    flag_same: float = 60.0          # 같은 카테고리(멘탈/건강/매몰) 2명↑ 같은 팀 (강한 소프트)
+    flag_same: float = 60.0          # 같은 카테고리(멘탈/매몰) 2명↑ 같은 팀 (강한 소프트)
     flag_cross: float = 4.0          # 서로 다른 카테고리 태그가 한 팀에 (약한 소프트)
     role_required: float = 25.0      # 팀마다 분위기메이커·매니저·책임자 각 1명 (강한 소프트)
     role_supporter: float = 5.0      # 팀에 서포터가 있으면 보너스
@@ -150,7 +150,7 @@ _FLAG_FIELDS = [f for f, _ in FLAG_CATEGORIES]
 
 
 def _flag_same(teams: list[list[Student]]) -> int:
-    """같은 카테고리(멘탈/건강/매몰) 태그가 한 팀에 2명 이상일 때 초과분 합계."""
+    """같은 카테고리(멘탈/매몰) 태그가 한 팀에 2명 이상일 때 초과분 합계."""
     extra = 0
     for team in teams:
         for f in _FLAG_FIELDS:

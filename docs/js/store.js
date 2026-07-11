@@ -158,6 +158,7 @@
     // 데이터 뮤테이션
     setStudents: mut((list) => { cur().students = list; reconcileBoard(); }),
     setRelations: mut((list) => { cur().relations = list; }),
+    applyGrades: mut((list) => { const m = byId(); list.forEach((g) => { const s = m.get(g.id); if (s) s.units = g.units; }); }),
     addStudent: mut((s) => { cur().students.push(s); cur().board.pool.push(s.id); }),
     updateStudent: mut((id, patch) => { const s = cur().students.find((x) => x.id === id); if (s) Object.assign(s, patch); }),
     deleteStudent: mut((id) => { cur().students = cur().students.filter((s) => s.id !== id); reconcileBoard(); }),

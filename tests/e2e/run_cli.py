@@ -15,7 +15,8 @@ sys.path.insert(0, REPO)
 
 from data.make_sample import generate, write  # noqa: E402
 from teambuilder.builder import build_recommendations  # noqa: E402
-from teambuilder.loader import load_relations, load_students  # noqa: E402
+from teambuilder.loader import (load_grades, load_relations,  # noqa: E402
+                                load_students)
 from teambuilder.relationship import build_relationship_graph  # noqa: E402
 
 CASES = [(10, 2), (25, 5), (60, 10)]
@@ -38,9 +39,10 @@ def main():
     for n, teams in CASES:
         print(f"\n[N={n}명 · {teams}팀]")
         d = tempfile.mkdtemp()
-        s, r, meta = generate(n, seed=7)
-        write(d, s, r, meta)
+        s, r, gr, meta = generate(n, seed=7)
+        write(d, s, r, gr, meta)
         students = load_students(os.path.join(d, "students.csv"))
+        load_grades(os.path.join(d, "grades.csv"), students)
         relations = load_relations(os.path.join(d, "relations.csv"), students)
         graph = build_relationship_graph(students, relations)
 

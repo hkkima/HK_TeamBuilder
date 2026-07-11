@@ -17,7 +17,7 @@ import json
 import os
 import random
 
-DISPS = ["작업자", "매니저", "분위기메이커", "책임자", "연구자", "서포터"]
+DISPS = ["작업자", "매니저", "분위기메이커", "책임자", "연구원", "서포터"]
 MBTIS = ["ENFP", "INTJ", "ISTJ", "ESFJ", "INFP", "ENTP", "ISFP", "ESTJ",
          "INFJ", "ENTJ", "ISFJ", "ESTP", "ENFJ", "INTP", "ESFP", "ISTP"]
 NEG_NOTES = ["소통이 잘 되지 않음", "작업 방식에서 마찰", "역할 분배로 불만", "협업 태도 아쉬움"]
@@ -46,11 +46,7 @@ def generate(n, seed=7):
             "issue_note": "",
             "special": "",
             "mental": "",
-            "health": "",
             "sunk": "",
-            "단원1": rng.randint(1, 5),
-            "단원2": rng.randint(1, 5),
-            "단원3": rng.randint(1, 5),
         })
 
     # 고이슈 주입 (팀 수보다 적게 → 분산 가능). 대략 n//8명.
@@ -67,10 +63,19 @@ def generate(n, seed=7):
         students[i]["special"] = "Y"
 
     # 소프트 카테고리 태그 주입 (각 팀 수보다 적게)
-    cats = {"mental": max(2, n // 10), "health": max(2, n // 12), "sunk": max(2, n // 12)}
+    cats = {"mental": max(2, n // 10), "sunk": max(2, n // 12)}
     for col, cnt in cats.items():
         for i in rng.sample(range(n), min(cnt, n)):
             students[i][col] = "Y"
+
+    # 교과 점수(단원 1~4, 60~100) — 별도 grades 로 산출
+    grades = []
+    for s in students:
+        u = [rng.randint(60, 100) if rng.random() > 0.12 else "" for _ in range(4)]
+        nums = [x for x in u if x != ""]
+        avg = round(sum(nums) / len(nums), 1) if nums else ""
+        grades.append({"INDEX": s["id"], "이름": s["name"], "평균": avg,
+                       "1단원": u[0], "2단원": u[1], "3단원": u[2], "4단원": u[3]})
 
     names = [s["name"] for s in students]
 
@@ -123,20 +128,25 @@ def generate(n, seed=7):
         "high_issue": [names[i] for i in hi_idx],
         "special": [names[i] for i in sp_idx],
     }
-    return students, relations, meta
+    return students, relations, grades, meta
 
 
-def write(out_dir, students, relations, meta):
+def write(out_dir, students, relations, grades, meta):
     os.makedirs(out_dir, exist_ok=True)
+    # 학생 마스터 (교과 점수는 별도 grades.csv)
     scols = ["id", "name", "leadership", "management", "planning",
              "execution", "communication", "primary_disp", "secondary_disp",
-             "mbti", "issue_level", "issue_note", "special", "mental", "health",
-             "sunk", "단원1", "단원2", "단원3"]
+             "mbti", "issue_level", "issue_note", "special", "mental", "sunk"]
     with open(os.path.join(out_dir, "students.csv"), "w", newline="",
               encoding="utf-8-sig") as fh:
         w = csv.DictWriter(fh, fieldnames=scols)
         w.writeheader()
         w.writerows(students)
+    with open(os.path.join(out_dir, "grades.csv"), "w", newline="",
+              encoding="utf-8-sig") as fh:
+        w = csv.DictWriter(fh, fieldnames=["INDEX", "이름", "평균", "1단원", "2단원", "3단원", "4단원"])
+        w.writeheader()
+        w.writerows(grades)
     with open(os.path.join(out_dir, "relations.csv"), "w", newline="",
               encoding="utf-8-sig") as fh:
         w = csv.DictWriter(fh, fieldnames=["DATE", "FROM", "TO", "TYPE", "W", "NOTE"])
@@ -152,8 +162,8 @@ def main():
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--out-dir", default=os.path.join(os.path.dirname(__file__), "sample"))
     a = p.parse_args()
-    students, relations, meta = generate(a.n, a.seed)
-    write(a.out_dir, students, relations, meta)
+    students, relations, grades, meta = generate(a.n, a.seed)
+    write(a.out_dir, students, relations, grades, meta)
     print(f"생성 완료: {len(students)}명, 관계 {len(relations)}건 "
           f"(갈등 {len(meta['conflict_pairs'])} · 긍정 {len(meta['positive_pairs'])} "
           f"· 고이슈 {len(meta['high_issue'])})")

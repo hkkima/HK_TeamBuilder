@@ -9,7 +9,7 @@
     flag_same: "동일태그격리", flag_cross: "교차태그", role_required: "필수역할", role_supporter: "서포터",
     issue_stack: "고이슈격리", issue_balance: "이슈분산", disp_diversity: "성향다양성", leader: "리더확보",
     mbti_balance: "MBTI", competency_coverage: "역량커버", competency_balance: "역량평준(보조)" };
-  const CAT_BADGE = { mental: ["멘", "#db2777"], health: ["건", "#0891b2"], sunk: ["매", "#65a30d"] };
+  const CAT_BADGE = { mental: ["멘", "#db2777"], sunk: ["매", "#65a30d"] };
 
   function studentsOf(ids) { const m = Store.byId(); return ids.map((id) => m.get(id)).filter(Boolean); }
   function dispIn(ms) { const c = {}; TB.DISPOSITIONS.forEach((d) => (c[d] = 0)); ms.forEach((m) => { if (c[m.primary_disp] != null) c[m.primary_disp]++; }); const p = TB.DISPOSITIONS.filter((d) => c[d]).map((d) => `${d}${c[d]}`); return p.length ? p.join(" ") : "성향–"; }
@@ -178,7 +178,7 @@
   function exportCsv() {
     const p = Store.project(); if (!p.compositions.length) { global.UI.toast("저장/생성된 조합이 없습니다", "bad"); return; }
     const byId = Store.byId();
-    let csv = "﻿composition,team,team_name,team_leader,team_note,id,name,mbti,primary_disp,secondary_disp,comp_avg,leadership,issue_level,issue_note,special,mental,health,sunk,leader_candidate,pinned\n";
+    let csv = "﻿composition,team,team_name,team_leader,team_note,id,name,mbti,primary_disp,secondary_disp,comp_avg,leadership,issue_level,issue_note,special,mental,sunk,leader_candidate,pinned\n";
     p.compositions.forEach((c) => {
       const leaders = c.leaderByTeam || [], notes = c.notes || [], names = c.teamNames || [], pins = c.pins || {};
       c.teams.forEach((ids, ti) => ids.forEach((id) => {
@@ -186,7 +186,7 @@
         const cells = [c.name, ti + 1, names[ti] || ("팀 " + (ti + 1)), leaders[ti] === id ? "Y" : "", notes[ti] || "",
           m.id, m.name, m.mbti, m.primary_disp || "", m.secondary_disp || "", cv == null ? "" : cv.toFixed(2),
           m.leadership == null ? "" : m.leadership, m.issue_level || 0, m.issue_note || "", m.special ? "Y" : "",
-          m.mental ? "Y" : "", m.health ? "Y" : "", m.sunk ? "Y" : "", TB.leaderCandidate(m) ? "Y" : "", pins[id] != null ? "Y" : ""];
+          m.mental ? "Y" : "", m.sunk ? "Y" : "", TB.leaderCandidate(m) ? "Y" : "", pins[id] != null ? "Y" : ""];
         csv += cells.map((v) => { const t = String(v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; }).join(",") + "\n";
       }));
     });

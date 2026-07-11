@@ -39,8 +39,8 @@
       if (t.length && !t.some((id) => byId.get(id) && TB.leaderCandidate(byId.get(id))))
         probs.push({ type: "leader", teams: [ti], ids: [], label: `팀 ${ti + 1} 리더 후보 없음`, sev: 1, fixable: true });
     });
-    // 같은 카테고리 태그(멘탈/건강/매몰) 2명↑ 겹침
-    const CATLBL = { mental: "멘탈", health: "건강", sunk: "매몰" };
+    // 같은 카테고리 태그(멘탈/매몰) 2명↑ 겹침
+    const CATLBL = { mental: "멘탈", sunk: "매몰" };
     TB.FLAG_FIELDS.forEach((cat) => {
       board.teams.forEach((t, ti) => {
         const c = t.filter((id) => byId.get(id) && byId.get(id)[cat]);

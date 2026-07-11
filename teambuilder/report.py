@@ -111,7 +111,7 @@ def write_csv(path: str, recs) -> None:
         w.writerow(["option", "team", "id", "name", "mbti",
                     "primary_disp", "secondary_disp", "leadership",
                     "comp_avg", "issue_level", "issue_note", "special",
-                    "mental", "health", "sunk", "leader_candidate"])
+                    "mental", "sunk", "leader_candidate"])
         for oi, rec in enumerate(recs, start=1):
             for team in rec.teams:
                 for m in team.members:
@@ -123,7 +123,6 @@ def write_csv(path: str, recs) -> None:
                         "" if cv is None else round(cv, 2),
                         m.issue_level, m.issue_note,
                         "Y" if m.special else "",
-                        "Y" if m.mental else "", "Y" if m.health else "",
-                        "Y" if m.sunk else "",
+                        "Y" if m.mental else "", "Y" if m.sunk else "",
                         "Y" if m.is_leader_candidate() else "",
                     ])

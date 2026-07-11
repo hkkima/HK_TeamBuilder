@@ -18,7 +18,7 @@ DISP_WORKER = "작업자"
 DISP_MANAGER = "매니저"
 DISP_MOOD = "분위기메이커"
 DISP_OWNER = "책임자"
-DISP_RESEARCHER = "연구자"
+DISP_RESEARCHER = "연구원"
 DISP_SUPPORTER = "서포터"
 DISPOSITIONS = (DISP_WORKER, DISP_MANAGER, DISP_MOOD,
                 DISP_OWNER, DISP_RESEARCHER, DISP_SUPPORTER)
@@ -31,7 +31,7 @@ REQUIRED_DISPS = (DISP_MOOD, DISP_MANAGER, DISP_OWNER)
 
 # 소프트 카테고리 태그: (필드명, 표시명). 같은 카테고리는 한 팀 2명 이상 강하게 회피,
 # 서로 다른 카테고리끼리는 약하게 회피.
-FLAG_CATEGORIES = (("mental", "멘탈"), ("health", "건강"), ("sunk", "매몰"))
+FLAG_CATEGORIES = (("mental", "멘탈"), ("sunk", "매몰"))
 
 # 강한 역량으로 보는 기준(1~5 척도) — 역량 커버리지 계산용.
 STRONG_THRESHOLD = 4.0
@@ -46,7 +46,7 @@ DISP_ALIASES = {
     "분위기메이커": DISP_MOOD, "분위기": DISP_MOOD, "mood": DISP_MOOD,
     "moodmaker": DISP_MOOD, "윤활유": DISP_MOOD,
     "책임자": DISP_OWNER, "owner": DISP_OWNER, "리더": DISP_OWNER, "leader": DISP_OWNER,
-    "연구자": DISP_RESEARCHER, "researcher": DISP_RESEARCHER, "분석가": DISP_RESEARCHER,
+    "연구원": DISP_RESEARCHER, "연구자": DISP_RESEARCHER, "researcher": DISP_RESEARCHER, "분석가": DISP_RESEARCHER,
     "서포터": DISP_SUPPORTER, "supporter": DISP_SUPPORTER, "조력자": DISP_SUPPORTER,
 }
 
@@ -75,9 +75,8 @@ class Student:
     mbti: str = ""
     issue_level: float = 0.0                # 이슈 강도 (0~3, 0=없음)
     issue_note: str = ""                    # 이슈 비고
-    special: bool = False                   # 특수 관리 태그 — 한 팀에 2명 이상 금지(하드)
+    special: bool = False                   # 관리 대상(특별) — 한 팀에 2명 이상 금지(하드)
     mental: bool = False                    # 멘탈 이슈 (소프트 카테고리)
-    health: bool = False                    # 건강 이슈 (소프트 카테고리)
     sunk: bool = False                      # 매몰 성향 (소프트 카테고리)
     units: dict[str, float] = field(default_factory=dict)  # 단원별 점수
 

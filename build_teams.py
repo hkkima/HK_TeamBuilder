@@ -13,7 +13,8 @@ import os
 import sys
 
 from teambuilder.builder import build_recommendations
-from teambuilder.loader import load_constraints, load_relations, load_students
+from teambuilder.loader import (load_constraints, load_grades,
+                                load_relations, load_students)
 from teambuilder.relationship import build_relationship_graph
 from teambuilder.report import render_report, write_csv
 from teambuilder.scoring import Weights
@@ -23,6 +24,7 @@ def parse_args(argv):
     p = argparse.ArgumentParser(description="관계+성향+이슈 기반 수강생 팀빌더 (역량 보조)")
     p.add_argument("--students", required=True)
     p.add_argument("--relations", help="관계 평가 CSV (from,to,type=POS/NEG,weight,note)")
+    p.add_argument("--grades", help="교과 점수 CSV (이름 + 단원별 60~100) — units 병합")
     p.add_argument("--constraints", help="강제 제약 CSV (id_a,id_b,type=together|apart)")
     p.add_argument("--pins", help="핀 고정 (예: S01:0,S02:2 — 학생을 팀인덱스에 고정)")
 
@@ -74,6 +76,8 @@ def build_weights(a) -> Weights:
 def main(argv):
     a = parse_args(argv)
     students = load_students(a.students)
+    if a.grades:
+        load_grades(a.grades, students)
     relations = load_relations(a.relations, students) if a.relations else []
     force_together, force_separate = (set(), set())
     if a.constraints:
