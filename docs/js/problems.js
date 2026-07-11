@@ -56,10 +56,28 @@
           probs.push({ type: "role", role, teams: [ti], ids: [], label: `팀 ${ti + 1} ${role} 없음`, sev: 2, fixable: true });
       });
     });
+    // 팀장/부팀장 쌍(책임자≥1·매니저≥1) 미구성
+    board.teams.forEach((t, ti) => {
+      const ms = studentsOf(t, byId);
+      if (ms.length >= 2 && !hasLeaderPair(ms))
+        probs.push({ type: "leaderpair", teams: [ti], ids: [], label: `팀 ${ti + 1} 팀장·부팀장 쌍(책임자·매니저) 부족`, sev: 2, fixable: true });
+    });
+    // 분위기메이커 확보 부족(팀 점수<1)
+    board.teams.forEach((t, ti) => {
+      const ms = studentsOf(t, byId);
+      if (ms.length && TB.teamDisp(ms, TB.DISP_MOOD) < 1)
+        probs.push({ type: "mood", teams: [ti], ids: [], label: `팀 ${ti + 1} 분위기메이커 부족(점수<1)`, sev: 2, fixable: true });
+    });
     probs.sort((a, b) => b.sev - a.sev);
     return { problems: probs, score: sb };
   }
   function nm(byId, id) { const s = byId.get(id); return s ? s.name : id; }
+  function hasLeaderPair(ms) {
+    for (let i = 0; i < ms.length; i++) for (let j = i + 1; j < ms.length; j++)
+      if (TB.dispScore(ms[i], TB.DISP_OWNER) + TB.dispScore(ms[j], TB.DISP_OWNER) >= 1 &&
+          TB.dispScore(ms[i], TB.DISP_MANAGER) + TB.dispScore(ms[j], TB.DISP_MANAGER) >= 1) return true;
+    return false;
+  }
 
   // 특정 문제를 없애는 단일 스왑/이동을 탐색 → 새 teams(id 배열) 반환 또는 null
   function autoFix(problem, board, byId, graph, weights, pins) {
@@ -112,6 +130,8 @@
     if (type === "flag") { let e = 0; teams.forEach((t) => { const c = t.filter((id) => byId.get(id) && byId.get(id)[problem.cat]).length; if (c > 1) e += c - 1; }); return e; }
     if (type === "role") return sb.roleMissing;
     if (type === "leader") return teams.filter((t) => t.length && !t.some((id) => byId.get(id) && TB.leaderCandidate(byId.get(id)))).length;
+    if (type === "leaderpair") return sb.leaderPairMissing;
+    if (type === "mood") return sb.moodMissing;
     return 0;
   }
 

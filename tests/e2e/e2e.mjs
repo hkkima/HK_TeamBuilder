@@ -119,6 +119,32 @@ async function run() {
       return { catStack, roleMiss }; });
     check(catRole.catStack === 0, "동일 카테고리 태그 팀당 최대 1명");
     check(catRole.roleMiss === 0, "팀마다 분위기메이커·매니저·책임자 각 1명");
+    // 팀장/부팀장 지정 + 분위기메이커 확보
+    const lead = await pg.evaluate(() => {
+      const p = Store.project(), b = Store.byId();
+      let ok = true, moodOk = true, distinct = true;
+      p.board.teams.forEach((t, ti) => {
+        if (!t.length) return;
+        const L = p.board.leaderByTeam[ti], D = p.board.deputyByTeam[ti];
+        if (!L || !t.includes(L)) ok = false;
+        if (t.length >= 2 && (!D || !t.includes(D) || D === L)) distinct = false;
+        const mood = t.reduce((s, id) => s + TeamBuilder.dispScore(b.get(id), TeamBuilder.DISP_MOOD), 0);
+        if (mood < 1) moodOk = false;
+      });
+      return { ok, moodOk, distinct };
+    });
+    check(lead.ok, "모든 팀 팀장 지정");
+    check(lead.distinct, "모든 팀 부팀장 지정(팀장과 상이)");
+    check(lead.moodOk, "모든 팀 분위기메이커 점수 ≥ 1");
+    // 렌더 순서: 팀장 최상단, 부팀장 그 아래
+    const order = await pg.evaluate(() => {
+      const p = Store.project();
+      const col = document.querySelector('#board .team-col[data-zone="team-0"]');
+      const blocks = [...col.querySelectorAll(".dropzone .block")].map((b) => b.dataset.id);
+      return { first: blocks[0], second: blocks[1], L: p.board.leaderByTeam[0], D: p.board.deputyByTeam[0] };
+    });
+    check(order.first === order.L, "팀장이 리스트 최상단");
+    check(order.second === order.D, "부팀장이 팀장 바로 아래");
 
     // 4) 조합 목록 선택
     if (s.comps >= 2) {
@@ -186,8 +212,8 @@ async function run() {
     // 9) CSV 내보내기
     const [dl] = await Promise.all([pg.waitForEvent("download", { timeout: 10000 }), pg.click('[data-act="export"]')]);
     const csv = readFileSync(await dl.path(), "utf-8").replace(/^﻿/, "");
-    check(csv.split("\n")[0].startsWith("composition,team,team_name,team_leader,team_note,id,name"), "CSV 헤더 정상");
-    check(/,Y,/.test(csv) || csv.includes(",Y\n") || csv.includes("Y,"), "CSV에 팀장/핀 표기 존재");
+    check(csv.split("\n")[0].startsWith("composition,team,team_name,team_role,team_note,id,name"), "CSV 헤더 정상");
+    check(csv.includes(",팀장,") && (/,Y,/.test(csv) || csv.includes(",Y\n") || csv.includes("Y,")), "CSV에 팀장/부팀장/핀 표기 존재");
 
     // 10) 영속성 (새로고침)
     console.log("\n[영속성/프로젝트/비교]");

@@ -6,7 +6,7 @@
 
   const esc = (s) => global.UI.esc(s);
   const PART_LABELS = { force_together: "강제결합", force_separate: "강제분리", special_stack: "특수격리", conflict: "갈등분리", positive: "긍정유지",
-    flag_same: "동일태그격리", flag_cross: "교차태그", role_required: "필수역할", role_supporter: "서포터",
+    flag_same: "동일태그격리", flag_cross: "교차태그", leader_pair: "팀장쌍", mood_cover: "분위기확보", role_required: "필수역할", role_supporter: "서포터",
     issue_stack: "고이슈격리", issue_balance: "이슈분산", disp_diversity: "성향다양성", leader: "리더확보",
     mbti_balance: "MBTI", competency_coverage: "역량커버", competency_balance: "역량평준(보조)" };
   const CAT_BADGE = { mental: ["멘", "#db2777"], sunk: ["매", "#65a30d"] };
@@ -17,18 +17,29 @@
   function leadersIn(ms) { const l = ms.filter(TB.leaderCandidate).map((m) => m.name); return l.length ? l.join(", ") : "없음"; }
   function issueSum(ms) { return ms.reduce((s, m) => s + (m.issue_level || 0), 0); }
 
-  function blockHtml(m, marker, isLeader, inPool, pinned) {
-    const cls = "block" + (marker ? " " + marker : "") + (isLeader ? " leader" : "") + (pinned ? " pinned" : "") + (selectedId === m.id ? " selected" : "");
+  function blockHtml(m, marker, role, inPool, pinned) {
+    // role: "leader"(팀장) | "deputy"(부팀장) | null
+    const cls = "block" + (marker ? " " + marker : "") + (role ? " " + role : "") + (pinned ? " pinned" : "") + (selectedId === m.id ? " selected" : "");
+    const roleBadge = role === "leader" ? '<span class="role-badge lead" title="팀장">👑 팀장</span>'
+      : role === "deputy" ? '<span class="role-badge dep" title="부팀장">🎖 부팀장</span>' : "";
     const cand = TB.leaderCandidate(m) ? '<span class="cand" title="리더 후보">★</span>' : "";
     const cv = TB.compValue(m); const comp = cv != null ? `<span class="comp-val">역량 ${cv.toFixed ? cv.toFixed(1) : cv}</span>` : "";
     const iss = (m.issue_level || 0) > 0 ? `<span class="issue-badge lv${m.issue_level}" title="이슈 ${m.issue_level}${m.issue_note ? " · " + esc(m.issue_note) : ""}">⚠${m.issue_level}</span>` : "";
     const sp = m.special ? '<span class="sp-badge" title="특수 관리 — 한 팀 2명 금지">특</span>' : "";
     const cats = TB.FLAG_FIELDS.filter((f) => m[f]).map((f) => `<span class="cat-badge" style="background:${CAT_BADGE[f][1]}" title="${f}">${CAT_BADGE[f][0]}</span>`).join("");
+    const dispTag = m.primary_disp ? `<span class="role-tag">${esc(m.primary_disp)}${m.secondary_disp ? `<span class="sub-disp">/${esc(m.secondary_disp)}</span>` : ""}</span>` : "";
     const pin = inPool ? "" : `<button class="btn-pin${pinned ? " on" : ""}" data-pin="${esc(m.id)}" title="이 팀에 고정(핀)">📌</button>`;
-    const crown = inPool ? "" : `<button class="btn-leader${isLeader ? " on" : ""}" data-leader="${esc(m.id)}" title="팀장 지정/해제">👑</button>`;
+    const crown = inPool ? "" : `<button class="btn-leader${role === "leader" ? " on" : ""}" data-leader="${esc(m.id)}" title="팀장 지정/해제">👑</button>`;
+    const depBtn = inPool ? "" : `<button class="btn-deputy${role === "deputy" ? " on" : ""}" data-deputy="${esc(m.id)}" title="부팀장 지정/해제">🎖</button>`;
     return `<div class="${cls}" data-id="${esc(m.id)}" title="${esc(m.issue_note || "")}">
-      <div class="b-top"><span class="mbti">${esc(m.mbti || "–")}</span><span class="b-name">${esc(m.name)}</span>${cand}${sp}${cats}${iss}${pin}${crown}</div>
-      <div class="b-sub">${m.primary_disp ? `<span class="role-tag">${esc(m.primary_disp)}</span>` : ""}${comp}</div></div>`;
+      <div class="b-top"><span class="mbti">${esc(m.mbti || "–")}</span><span class="b-name">${esc(m.name)}</span>${roleBadge}${cand}${sp}${cats}${iss}${pin}${crown}${depBtn}</div>
+      <div class="b-sub">${dispTag}${comp}</div></div>`;
+  }
+  function orderMembers(ms, lid, did) {
+    const lead = ms.find((m) => m.id === lid);
+    const dep = ms.find((m) => m.id === did && m.id !== lid);
+    const rest = ms.filter((m) => m.id !== lid && !(dep && m.id === dep.id));
+    return [lead, dep, ...rest].filter(Boolean);
   }
 
   function liveScore() { const p = Store.project(); return TB.scorePartition(p.board.teams.map(studentsOf), Store.graph(), Store.weights()); }
@@ -126,8 +137,8 @@
 
     const pool = studentsOf(p.board.pool);
     let html = `<div class="board" id="board"><div class="team-col pool" data-zone="pool">
-      <div class="team-head"><div class="team-title">미배정 <span class="tcount">${pool.length}</span></div></div>
-      <div class="dropzone">${pool.map((m) => blockHtml(m, marker(m.id), false, true, false)).join("")}</div></div>`;
+      <div class="team-head"><div class="team-title-row"><div class="team-title">미배정</div> <span class="tcount">${pool.length}명</span></div></div>
+      <div class="dropzone">${pool.map((m) => blockHtml(m, marker(m.id), null, true, false)).join("")}</div></div>`;
     html += '<div class="teams-grid">';
     html += p.board.teams.map((ids, ti) => {
       const ms = studentsOf(ids);
@@ -135,20 +146,35 @@
       const spCount = ms.filter((m) => m.special).length;
       const missRoles = TB.REQUIRED_DISPS.filter((r) => !ms.some((m) => TB.coversDisp(m, r)));
       const catStack = TB.FLAG_FIELDS.filter((f) => ms.filter((m) => m[f]).length > 1).map((f) => CAT_BADGE[f][0]);
-      const warn = (teamConf ? `<div class="team-warn">⚠️ 갈등 ${teamConf}</div>` : "")
-        + (spCount > 1 ? `<div class="team-warn">🚫 특수관리 ${spCount}명(금지)</div>` : "")
-        + (catStack.length ? `<div class="team-warn">⚠️ 태그겹침 ${catStack.join("·")}</div>` : "")
-        + (missRoles.length && ms.length ? `<div class="team-warn role-miss">필수역할 부족: ${missRoles.join("·")}</div>` : "");
-      const lid = p.board.leaderByTeam[ti]; const lname = lid && byId.get(lid) ? esc(byId.get(lid).name) : "미지정";
+      const moodShort = ms.length && TB.teamDisp(ms, TB.DISP_MOOD) < 1;
+      const warns = [];
+      if (teamConf) warns.push(`<span class="team-warn">⚠️ 갈등 ${teamConf}</span>`);
+      if (spCount > 1) warns.push(`<span class="team-warn hard">🚫 특수관리 ${spCount}명</span>`);
+      if (catStack.length) warns.push(`<span class="team-warn">⚠️ 태그겹침 ${catStack.join("·")}</span>`);
+      if (missRoles.length && ms.length) warns.push(`<span class="team-warn role-miss">필수역할 부족 ${missRoles.join("·")}</span>`);
+      if (moodShort) warns.push(`<span class="team-warn role-miss">분위기메이커 부족</span>`);
+      const warn = warns.length ? `<div class="warn-row">${warns.join("")}</div>` : "";
+      const lid = p.board.leaderByTeam[ti], did = p.board.deputyByTeam[ti];
+      const lname = lid && byId.get(lid) ? esc(byId.get(lid).name) : "미지정";
+      const dname = did && byId.get(did) ? esc(byId.get(did).name) : "미지정";
       const allPinned = ids.length && ids.every((id) => p.pins[id] != null);
+      const ordered = orderMembers(ms, lid, did);
       return `<div class="team-col${allPinned ? " team-locked" : ""}" data-zone="team-${ti}">
         <div class="team-head">
-          <div class="team-title"><input class="team-name" data-teamname="${ti}" value="${esc(p.board.teamNames[ti] || ("팀 " + (ti + 1)))}" /> <span class="tcount">${ms.length}</span>
-            <button class="btn-lockteam${allPinned ? " on" : ""}" data-lockteam="${ti}" title="팀 전원 고정/해제">🔒</button></div>
-          <div class="team-meta">${dispIn(ms)} · 역량 ${avgComp(ms)} · 이슈 ${issueSum(ms)}<br>리더후보: ${esc(leadersIn(ms))} · 팀장: 👑${lname}</div>${warn}
+          <div class="team-title-row">
+            <input class="team-name" data-teamname="${ti}" value="${esc(p.board.teamNames[ti] || ("팀 " + (ti + 1)))}" />
+            <span class="tcount">${ms.length}명</span>
+            <button class="btn-lockteam${allPinned ? " on" : ""}" data-lockteam="${ti}" title="팀 전원 고정/해제">🔒</button>
+          </div>
+          <div class="lead-row">
+            <span class="lead-chip"><span class="lc-tag">팀장</span> 👑 ${lname}</span>
+            <span class="dep-chip"><span class="lc-tag">부팀장</span> 🎖 ${dname}</span>
+          </div>
+          <div class="stat-row"><span class="stat">${dispIn(ms)}</span><span class="stat">역량 ${avgComp(ms)}</span><span class="stat">이슈 ${issueSum(ms)}</span></div>
+          ${warn}
           <textarea class="team-note" data-note="${ti}" rows="1" placeholder="운영자 메모…">${esc(p.board.notes[ti] || "")}</textarea>
         </div>
-        <div class="dropzone">${ms.map((m) => blockHtml(m, marker(m.id), lid === m.id, false, p.pins[m.id] != null)).join("")}</div></div>`;
+        <div class="dropzone">${ordered.map((m) => blockHtml(m, marker(m.id), m.id === lid ? "leader" : (m.id === did && m.id !== lid ? "deputy" : null), false, p.pins[m.id] != null)).join("")}</div></div>`;
     }).join("");
     html += "</div></div>";
     return html;
@@ -178,12 +204,13 @@
   function exportCsv() {
     const p = Store.project(); if (!p.compositions.length) { global.UI.toast("저장/생성된 조합이 없습니다", "bad"); return; }
     const byId = Store.byId();
-    let csv = "﻿composition,team,team_name,team_leader,team_note,id,name,mbti,primary_disp,secondary_disp,comp_avg,leadership,issue_level,issue_note,special,mental,sunk,leader_candidate,pinned\n";
+    let csv = "﻿composition,team,team_name,team_role,team_note,id,name,mbti,primary_disp,secondary_disp,comp_avg,leadership,issue_level,issue_note,special,mental,sunk,leader_candidate,pinned\n";
     p.compositions.forEach((c) => {
-      const leaders = c.leaderByTeam || [], notes = c.notes || [], names = c.teamNames || [], pins = c.pins || {};
+      const leaders = c.leaderByTeam || [], deputies = c.deputyByTeam || [], notes = c.notes || [], names = c.teamNames || [], pins = c.pins || {};
       c.teams.forEach((ids, ti) => ids.forEach((id) => {
         const m = byId.get(id); if (!m) return; const cv = TB.compValue(m);
-        const cells = [c.name, ti + 1, names[ti] || ("팀 " + (ti + 1)), leaders[ti] === id ? "Y" : "", notes[ti] || "",
+        const roleTag = leaders[ti] === id ? "팀장" : deputies[ti] === id ? "부팀장" : "";
+        const cells = [c.name, ti + 1, names[ti] || ("팀 " + (ti + 1)), roleTag, notes[ti] || "",
           m.id, m.name, m.mbti, m.primary_disp || "", m.secondary_disp || "", cv == null ? "" : cv.toFixed(2),
           m.leadership == null ? "" : m.leadership, m.issue_level || 0, m.issue_note || "", m.special ? "Y" : "",
           m.mental ? "Y" : "", m.sunk ? "Y" : "", TB.leaderCandidate(m) ? "Y" : "", pins[id] != null ? "Y" : ""];
@@ -202,6 +229,7 @@
     if (btn) {
       if (btn.dataset.pin != null) { Store.togglePin(btn.dataset.pin); return; }
       if (btn.dataset.leader != null) { Store.toggleLeader(btn.dataset.leader); return; }
+      if (btn.dataset.deputy != null) { Store.toggleDeputy(btn.dataset.deputy); return; }
       if (btn.dataset.lockteam != null) { Store.toggleTeamLock(Number(btn.dataset.lockteam)); return; }
       if (btn.dataset.delcomp != null) { Store.deleteComposition(Number(btn.dataset.delcomp)); return; }
       if (btn.dataset.jump != null) { const el = root.querySelector(`[data-zone="team-${btn.dataset.jump}"]`); if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" }); return; }

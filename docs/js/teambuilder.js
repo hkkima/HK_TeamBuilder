@@ -5,6 +5,7 @@
 
   const MBTI_AXES = [["E", "I"], ["N", "S"], ["T", "F"], ["J", "P"]];
   const DISPOSITIONS = ["작업자", "매니저", "분위기메이커", "책임자", "연구원", "서포터"];
+  const DISP_OWNER = "책임자", DISP_MANAGER = "매니저", DISP_MOOD = "분위기메이커";
   const LEADER_DISPS = ["책임자", "매니저"];
   const REQUIRED_DISPS = ["분위기메이커", "매니저", "책임자"];
   const DISP_SUPPORTER = "서포터";
@@ -181,10 +182,57 @@
     LEADER_DISPS.includes(m.primary_disp) || LEADER_DISPS.includes(m.secondary_disp);
   const highIssue = (m) => (m.issue_level || 0) >= HIGH_ISSUE;
 
+  // ---- 성향 점수 (주=1, 부=0.5) + 팀장/부팀장 지정 ----
+  const dispScore = (m, disp) => (m.primary_disp === disp ? 1 : m.secondary_disp === disp ? 0.5 : 0);
+  const teamDisp = (ms, disp) => ms.reduce((s, m) => s + dispScore(m, disp), 0);
+  // 두 명(distinct)으로 책임자≥1 · 매니저≥1 을 만족하는 리더 쌍이 존재하는가
+  function hasLeaderPair(ms) {
+    for (let i = 0; i < ms.length; i++) for (let j = i + 1; j < ms.length; j++)
+      if (dispScore(ms[i], DISP_OWNER) + dispScore(ms[j], DISP_OWNER) >= 1 &&
+          dispScore(ms[i], DISP_MANAGER) + dispScore(ms[j], DISP_MANAGER) >= 1) return true;
+    return false;
+  }
+  // 한 팀의 팀장/부팀장 지정: 책임자≥1·매니저≥1 커버 쌍 중 최선, 없으면 리더후보 순.
+  // 팀장 = 책임자 점수 높은 쪽(동률 리더십), 부팀장 = 나머지.
+  function designateTeam(ms) {
+    if (!ms.length) return { leader: null, deputy: null };
+    if (ms.length === 1) return { leader: ms[0].id, deputy: null };
+    const lead = (m) => (m.leadership || 0);
+    let best = null, a = null, b = null;
+    for (let i = 0; i < ms.length; i++) for (let j = i + 1; j < ms.length; j++) {
+      const os = dispScore(ms[i], DISP_OWNER) + dispScore(ms[j], DISP_OWNER);
+      const ms2 = dispScore(ms[i], DISP_MANAGER) + dispScore(ms[j], DISP_MANAGER);
+      if (os >= 1 && ms2 >= 1) {
+        const cover = os + ms2, ls = lead(ms[i]) + lead(ms[j]);
+        if (!best || cover > best.cover || (cover === best.cover && ls > best.ls)) best = { i, j, cover, ls };
+      }
+    }
+    if (best) { a = ms[best.i]; b = ms[best.j]; }
+    else {
+      const ranked = ms.slice().sort((x, y) =>
+        ((leaderCandidate(y) ? 1 : 0) - (leaderCandidate(x) ? 1 : 0)) ||
+        (dispScore(y, DISP_OWNER) - dispScore(x, DISP_OWNER)) || (lead(y) - lead(x)));
+      a = ranked[0]; b = ranked[1];
+    }
+    // 팀장 = 책임자 점수 우선(동률 리더십)
+    let leader = a, deputy = b;
+    if (dispScore(b, DISP_OWNER) > dispScore(a, DISP_OWNER) ||
+        (dispScore(b, DISP_OWNER) === dispScore(a, DISP_OWNER) && lead(b) > lead(a))) { leader = b; deputy = a; }
+    return { leader: leader.id, deputy: deputy.id };
+  }
+  function designateLeaders(teams) {
+    const leaderByTeam = [], deputyByTeam = [];
+    teams.forEach((t) => { const d = designateTeam(t); leaderByTeam.push(d.leader); deputyByTeam.push(d.deputy); });
+    return { leaderByTeam, deputyByTeam };
+  }
+  function leaderPairMissing(teams) { let m = 0; for (const t of teams) { if (t.length < 2) continue; if (!hasLeaderPair(t)) m++; } return m; }
+  function moodMissing(teams) { let m = 0; for (const t of teams) { if (t.length && teamDisp(t, DISP_MOOD) < 1) m++; } return m; }
+
   // ---- 점수화 ----
   const DEFAULT_WEIGHTS = {
     conflict: 100, positive: 8, special_stack: 500, issue_stack: 40, issue_balance: 10,
     flag_same: 60, flag_cross: 4, role_required: 25, role_supporter: 5,
+    leader_pair: 35, mood_cover: 22,
     disp_diversity: 10, leader: 14, mbti_balance: 8,
     competency_coverage: 8, competency_balance: 6,
     conflict_intensity: 1.0, positive_intensity: 0.5, competency_metric: "stdev",
@@ -266,11 +314,15 @@
     const spStacks = specialStacks(teams);
     const fSame = flagSame(teams);
     const roleMiss = roleMissing(teams);
+    const leaderMiss = leaderPairMissing(teams);
+    const moodMiss = moodMissing(teams);
     const parts = {
       conflict: -conflictPenalty, positive: +positiveBonus,
       special_stack: -w.special_stack * spStacks,
       flag_same: -w.flag_same * fSame,
       flag_cross: -w.flag_cross * flagCross(teams),
+      leader_pair: -(w.leader_pair || 0) * leaderMiss,
+      mood_cover: -(w.mood_cover || 0) * moodMiss,
       role_required: -w.role_required * roleMiss,
       role_supporter: +w.role_supporter * roleSupporterFrac(teams),
       issue_stack: -w.issue_stack * stacks,
@@ -284,7 +336,7 @@
       force_separate: -w.force_separate * violatedSeparate.length,
     };
     let total = 0; for (const k in parts) total += parts[k];
-    return { total, parts, intra, kept, brokenTogether, violatedSeparate, issueStacks: stacks, specialStacks: spStacks, flagSameStacks: fSame, roleMissing: roleMiss };
+    return { total, parts, intra, kept, brokenTogether, violatedSeparate, issueStacks: stacks, specialStacks: spStacks, flagSameStacks: fSame, roleMissing: roleMiss, leaderPairMissing: leaderMiss, moodMissing: moodMiss };
   }
 
   // ---- 시드 RNG ----
@@ -353,18 +405,32 @@
     groups.forEach((grp, gi) => { for (const i of grp) if (pins[ids[i]] != null) { groupPin.set(gi, pins[ids[i]]); break; } });
     const place = (gi, t) => { const grp = groups[gi]; if (remaining[t] < grp.length) return false; if (grpSp[gi] && teamHasSp[t]) return false; grp.forEach((i) => { assign[i] = t; inTeam[t].add(ids[i]); }); remaining[t] -= grp.length; if (grpSp[gi]) teamHasSp[t] = true; return true; };
     const cost = (gids, t) => { let c = 0; gids.forEach((g) => (sep.get(g) || new Set()).forEach((p) => { if (inTeam[t].has(p)) c++; })); return c; };
-    const placeFree = (gi) => {
+    // 현재 배정 기준 팀 성향 점수(주=1,부=0.5) / 그룹이 팀에 더할 점수
+    const teamDS = (t, disp) => { let s = 0; for (let i = 0; i < students.length; i++) if (assign[i] === t) s += dispScore(students[i], disp); return s; };
+    const grpDS = (gi, disp) => groups[gi].reduce((s, i) => s + dispScore(students[i], disp), 0);
+    // biasFn(gi,t): 낮을수록 선호 (커버리지 부족 팀 우선)
+    const placeFree = (gi, biasFn) => {
       const grp = groups[gi], gids = grp.map((i) => ids[i]);
       let cand = []; for (let t = 0; t < nTeams; t++) if (remaining[t] >= grp.length && !(grpSp[gi] && teamHasSp[t])) cand.push(t);
       if (!cand.length) return false;
-      shuffle(cand, rng); cand.sort((a, b) => cost(gids, a) - cost(gids, b));
+      shuffle(cand, rng); cand.sort((a, b) => (cost(gids, a) - cost(gids, b)) || (biasFn ? biasFn(gi, a) - biasFn(gi, b) : 0));
       return place(gi, cand[0]);
     };
+    const leaderBias = (gi, t) => { let b = 0; if (grpDS(gi, DISP_OWNER) > 0 && teamDS(t, DISP_OWNER) < 1) b -= 2; if (grpDS(gi, DISP_MANAGER) > 0 && teamDS(t, DISP_MANAGER) < 1) b -= 2; if (teamDS(t, DISP_OWNER) >= 1 && teamDS(t, DISP_MANAGER) >= 1) b += 1; return b; };
+    const moodBias = (gi, t) => (teamDS(t, DISP_MOOD) < 1 ? -2 : 1);
     for (const [gi, t] of groupPin) if (!place(gi, t)) return null;
     const spOrder = groups.map((_, gi) => gi).filter((gi) => grpSp[gi] && !groupPin.has(gi)).sort((x, y) => (groups[y].length - groups[x].length) || (rng() - 0.5));
     for (const gi of spOrder) if (!placeFree(gi)) return null;
-    const rest = groups.map((_, gi) => gi).filter((gi) => !grpSp[gi] && !groupPin.has(gi)).sort((x, y) => (groups[y].length - groups[x].length) || (rng() - 0.5));
-    for (const gi of rest) if (!placeFree(gi)) return null;
+    // 단계별 배치: ① 리더 후보(책임자/매니저) 분산 → ② 분위기메이커 확보 → ③ 나머지
+    const rest = groups.map((_, gi) => gi).filter((gi) => !grpSp[gi] && !groupPin.has(gi));
+    const isLeaderG = (gi) => grpDS(gi, DISP_OWNER) > 0 || grpDS(gi, DISP_MANAGER) > 0;
+    const isMoodG = (gi) => grpDS(gi, DISP_MOOD) > 0;
+    const leaderG = rest.filter(isLeaderG).sort((x, y) => (grpDS(y, DISP_OWNER) + grpDS(y, DISP_MANAGER) - grpDS(x, DISP_OWNER) - grpDS(x, DISP_MANAGER)) || (groups[y].length - groups[x].length) || (rng() - 0.5));
+    const moodG = rest.filter((gi) => !isLeaderG(gi) && isMoodG(gi)).sort((x, y) => (grpDS(y, DISP_MOOD) - grpDS(x, DISP_MOOD)) || (groups[y].length - groups[x].length) || (rng() - 0.5));
+    const otherG = rest.filter((gi) => !isLeaderG(gi) && !isMoodG(gi)).sort((x, y) => (groups[y].length - groups[x].length) || (rng() - 0.5));
+    for (const gi of leaderG) if (!placeFree(gi, leaderBias)) return null;
+    for (const gi of moodG) if (!placeFree(gi, moodBias)) return null;
+    for (const gi of otherG) if (!placeFree(gi)) return null;
     return assign;
   }
   function localSearch(students, assign, sizes, graph, w, rng, maxIter, fT, fS, pinned, specialIdx) {
@@ -409,7 +475,10 @@
       if (assign === null) throw new Error("강제 제약/핀/특수 태그를 만족하는 초기 배치를 찾지 못했습니다.");
       const sb = localSearch(students, assign, sizes, graph, w, rng, maxIter, fT, fS, pinnedIdx, specialIdx);
       const partition = partitionFrom(students, assign, nTeams), sig = signature(partition);
-      if (!found.has(sig) || sb.total > found.get(sig).score.total) found.set(sig, { teams: partition, score: sb, signature: sig });
+      if (!found.has(sig) || sb.total > found.get(sig).score.total) {
+        const des = designateLeaders(partition);
+        found.set(sig, { teams: partition, score: sb, signature: sig, leaderByTeam: des.leaderByTeam, deputyByTeam: des.deputyByTeam });
+      }
     }
     return Array.from(found.values()).sort((a, b) => b.score.total - a.score.total).slice(0, nOptions);
   }
@@ -427,7 +496,8 @@
   global.TeamBuilder = {
     parseCSV, loadStudents, loadRelations, parseGrades, buildGraph, scorePartition, buildRecommendations,
     sizesFor, pairKey, pairsToSet, resolvePairs, validateConstraints, parsePairLines,
-    compValue, leaderCandidate, highIssue, coversDisp,
+    compValue, leaderCandidate, highIssue, coversDisp, dispScore, teamDisp, designateTeam, designateLeaders,
     MBTI_AXES, DISPOSITIONS, DEFAULT_WEIGHTS, REQUIRED_DISPS, FLAG_FIELDS, DISP_SUPPORTER,
+    DISP_OWNER, DISP_MANAGER, DISP_MOOD,
   };
 })(window);

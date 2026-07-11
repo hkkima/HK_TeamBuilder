@@ -103,6 +103,14 @@ class Student:
         """주/부 성향으로 해당 역할을 맡을 수 있으면 True."""
         return self.primary_disp == role or self.secondary_disp == role
 
+    def disp_score(self, role: str) -> float:
+        """해당 성향 점수: 주 성향=1, 부 성향=0.5, 아니면 0."""
+        if self.primary_disp == role:
+            return 1.0
+        if self.secondary_disp == role:
+            return 0.5
+        return 0.0
+
     def is_high_issue(self) -> bool:
         return self.issue_level >= HIGH_ISSUE_LEVEL
 

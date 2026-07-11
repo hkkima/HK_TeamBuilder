@@ -15,8 +15,9 @@ import statistics
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .models import (DISP_SUPPORTER, DISPOSITIONS, FLAG_CATEGORIES, MBTI_AXES,
-                     REQUIRED_DISPS, STRONG_THRESHOLD, Student)
+from .models import (DISP_MANAGER, DISP_MOOD, DISP_OWNER, DISP_SUPPORTER,
+                     DISPOSITIONS, FLAG_CATEGORIES, MBTI_AXES, REQUIRED_DISPS,
+                     STRONG_THRESHOLD, Student)
 from .relationship import RelationshipGraph, _key
 
 
@@ -29,6 +30,8 @@ class Weights:
     flag_cross: float = 4.0          # 서로 다른 카테고리 태그가 한 팀에 (약한 소프트)
     role_required: float = 25.0      # 팀마다 분위기메이커·매니저·책임자 각 1명 (강한 소프트)
     role_supporter: float = 5.0      # 팀에 서포터가 있으면 보너스
+    leader_pair: float = 35.0        # 팀장+부팀장 쌍이 책임자≥1·매니저≥1 커버 (강한 소프트)
+    mood_cover: float = 22.0         # 팀 분위기메이커 점수(주1/부0.5)≥1 (강한 소프트)
     issue_stack: float = 40.0        # 같은 팀 고이슈 2명↑ 1명당 페널티
     issue_balance: float = 10.0      # 팀 간 이슈 총량 표준편차 스케일
     disp_diversity: float = 10.0     # 성향 다양성(0~1)
@@ -57,6 +60,8 @@ class ScoreBreakdown:
     special_stacks: int = 0
     flag_same_stacks: int = 0
     role_missing: int = 0
+    leader_pair_missing: int = 0
+    mood_missing: int = 0
 
 
 def _mbti_balance(teams: list[list[Student]]) -> float:
@@ -188,6 +193,38 @@ def _role_required_missing(teams: list[list[Student]]) -> int:
     return miss
 
 
+def _has_leader_pair(team: list[Student]) -> bool:
+    """책임자 점수≥1 · 매니저 점수≥1 을 만족하는 서로 다른 두 명이 있는가."""
+    n = len(team)
+    for i in range(n):
+        for j in range(i + 1, n):
+            a, b = team[i], team[j]
+            if (a.disp_score(DISP_OWNER) + b.disp_score(DISP_OWNER) >= 1.0
+                    and a.disp_score(DISP_MANAGER) + b.disp_score(DISP_MANAGER) >= 1.0):
+                return True
+    return False
+
+
+def _leader_pair_missing(teams: list[list[Student]]) -> int:
+    """팀장+부팀장 쌍(책임자≥1·매니저≥1)을 구성할 수 없는 팀(2명 이상) 수."""
+    miss = 0
+    for team in teams:
+        if len(team) < 2:
+            continue
+        if not _has_leader_pair(team):
+            miss += 1
+    return miss
+
+
+def _mood_missing(teams: list[list[Student]]) -> int:
+    """분위기메이커 점수(주1/부0.5) 합이 1 미만인 비어있지 않은 팀 수."""
+    miss = 0
+    for team in teams:
+        if team and sum(m.disp_score(DISP_MOOD) for m in team) < 1.0:
+            miss += 1
+    return miss
+
+
 def _role_supporter_frac(teams: list[list[Student]]) -> float:
     """서포터를 보유한 팀 비율 (0~1)."""
     nonempty = [t for t in teams if t]
@@ -237,6 +274,8 @@ def score_partition(
     sp_stacks = _special_stacks(teams)
     flag_same = _flag_same(teams)
     role_miss = _role_required_missing(teams)
+    leader_miss = _leader_pair_missing(teams)
+    mood_miss = _mood_missing(teams)
 
     parts = {
         "conflict": -conflict_penalty,
@@ -244,6 +283,8 @@ def score_partition(
         "special_stack": -weights.special_stack * sp_stacks,
         "flag_same": -weights.flag_same * flag_same,
         "flag_cross": -weights.flag_cross * _flag_cross(teams),
+        "leader_pair": -weights.leader_pair * leader_miss,
+        "mood_cover": -weights.mood_cover * mood_miss,
         "role_required": -weights.role_required * role_miss,
         "role_supporter": +weights.role_supporter * _role_supporter_frac(teams),
         "issue_stack": -weights.issue_stack * stacks,
@@ -263,4 +304,5 @@ def score_partition(
         broken_together=broken_together, violated_separate=violated_separate,
         issue_stacks=stacks, special_stacks=sp_stacks,
         flag_same_stacks=flag_same, role_missing=role_miss,
+        leader_pair_missing=leader_miss, mood_missing=mood_miss,
     )

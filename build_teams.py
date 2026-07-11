@@ -40,6 +40,7 @@ def parse_args(argv):
 
     # 가중치
     for name in ("conflict", "positive", "special-stack", "issue-stack", "issue-balance",
+                 "leader-pair", "mood-cover",
                  "disp-diversity", "leader", "mbti-balance",
                  "competency-coverage", "competency-balance",
                  "force-together", "force-separate"):
@@ -56,6 +57,7 @@ def build_weights(a) -> Weights:
     mapping = {
         "w_conflict": "conflict", "w_positive": "positive",
         "w_special_stack": "special_stack",
+        "w_leader_pair": "leader_pair", "w_mood_cover": "mood_cover",
         "w_issue_stack": "issue_stack", "w_issue_balance": "issue_balance",
         "w_disp_diversity": "disp_diversity", "w_leader": "leader",
         "w_mbti_balance": "mbti_balance",

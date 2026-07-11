@@ -16,7 +16,7 @@
       students: [], relations: [], constraints: { together: [], apart: [] }, pins: {},
       settings: defaultSettings(),
       compositions: [], activeIndex: -1,
-      board: { teams: [], pool: [], notes: [], leaderByTeam: [], teamNames: [] } };
+      board: { teams: [], pool: [], notes: [], leaderByTeam: [], deputyByTeam: [], teamNames: [] } };
   }
 
   const state = { projects: {}, currentId: null };
@@ -51,8 +51,9 @@
     p.pins = p.pins || {};
     p.settings = Object.assign(defaultSettings(), p.settings || {});
     p.settings.weights = Object.assign({}, TB.DEFAULT_WEIGHTS, p.settings.weights || {});
-    p.board = p.board || { teams: [], pool: [], notes: [], leaderByTeam: [], teamNames: [] };
+    p.board = p.board || { teams: [], pool: [], notes: [], leaderByTeam: [], deputyByTeam: [], teamNames: [] };
     p.board.teamNames = p.board.teamNames || p.board.teams.map((_, i) => "팀 " + (i + 1));
+    p.board.deputyByTeam = p.board.deputyByTeam || p.board.teams.map(() => null);
   }
 
   // ---- undo/redo ----
@@ -105,6 +106,10 @@
       const l = p.board.leaderByTeam[ti];
       return (l && p.board.teams[ti].includes(l)) ? l : null;
     });
+    p.board.deputyByTeam = p.board.teams.map((_, ti) => {
+      const d = (p.board.deputyByTeam || [])[ti];
+      return (d && p.board.teams[ti].includes(d) && d !== p.board.leaderByTeam[ti]) ? d : null;
+    });
     p.board.notes = p.board.teams.map((_, ti) => p.board.notes[ti] || "");
     p.board.teamNames = p.board.teams.map((_, ti) => p.board.teamNames[ti] || ("팀 " + (ti + 1)));
   }
@@ -114,6 +119,7 @@
     p.board.teams = Array.from({ length: n }, () => []);
     p.board.notes = Array.from({ length: n }, () => "");
     p.board.leaderByTeam = Array.from({ length: n }, () => null);
+    p.board.deputyByTeam = Array.from({ length: n }, () => null);
     p.board.teamNames = Array.from({ length: n }, (_, i) => "팀 " + (i + 1));
   }
 
@@ -175,11 +181,13 @@
       b.teams.forEach((t) => { const k = t.indexOf(id); if (k >= 0) t.splice(k, 1); });
       const pk = b.pool.indexOf(id); if (pk >= 0) b.pool.splice(pk, 1);
       b.leaderByTeam = b.leaderByTeam.map((l) => (l === id ? null : l));
+      b.deputyByTeam = (b.deputyByTeam || []).map((d) => (d === id ? null : d));
       if (cur().pins[id] != null) delete cur().pins[id]; // 옮기면 핀 해제
       if (zone === "pool") b.pool.push(id); else b.teams[Number(zone.split("-")[1])].push(id);
     }),
     setBoardTeams: mut((idTeams) => { const b = cur().board; b.teams = idTeams.map((t) => t.slice()); b.pool = []; reconcileBoard(); }),
-    toggleLeader: mut((id) => { const ti = teamOf(id); if (ti < 0) return; const l = cur().board.leaderByTeam; l[ti] = l[ti] === id ? null : id; }),
+    toggleLeader: mut((id) => { const ti = teamOf(id); if (ti < 0) return; const b = cur().board; const set = b.leaderByTeam[ti] === id ? null : id; b.leaderByTeam[ti] = set; if (set != null && b.deputyByTeam[ti] === id) b.deputyByTeam[ti] = null; }),
+    toggleDeputy: mut((id) => { const ti = teamOf(id); if (ti < 0) return; const b = cur().board; const set = b.deputyByTeam[ti] === id ? null : id; b.deputyByTeam[ti] = set; if (set != null && b.leaderByTeam[ti] === id) b.leaderByTeam[ti] = null; }),
     setTeamNote: mut((ti, text) => { cur().board.notes[ti] = text; }),
     renameTeam: mut((ti, name) => { cur().board.teamNames[ti] = name; }),
     togglePin: mut((id) => { const p = cur(); const ti = teamOf(id); if (ti < 0) { delete p.pins[id]; return; } if (p.pins[id] != null) delete p.pins[id]; else p.pins[id] = ti; }),
@@ -192,7 +200,9 @@
       const p = cur();
       p.compositions = recs.map((rec, i) => ({ name: "추천안 " + (i + 1), src: "추천",
         teams: rec.teams.map((t) => t.map((m) => m.id)),
-        notes: rec.teams.map(() => ""), leaderByTeam: rec.teams.map(() => null),
+        notes: rec.teams.map(() => ""),
+        leaderByTeam: (rec.leaderByTeam || rec.teams.map(() => null)).slice(),
+        deputyByTeam: (rec.deputyByTeam || rec.teams.map(() => null)).slice(),
         teamNames: rec.teams.map((_, ti) => "팀 " + (ti + 1)), pins: clone(p.pins) }));
       loadCompInternal(0);
     }),
@@ -201,7 +211,8 @@
       const p = cur();
       p.compositions.push({ name: name || ("저장 " + (p.compositions.length + 1)), src: "저장",
         teams: p.board.teams.map((t) => t.slice()), notes: p.board.notes.slice(),
-        leaderByTeam: p.board.leaderByTeam.slice(), teamNames: p.board.teamNames.slice(), pins: clone(p.pins) });
+        leaderByTeam: p.board.leaderByTeam.slice(), deputyByTeam: (p.board.deputyByTeam || []).slice(),
+        teamNames: p.board.teamNames.slice(), pins: clone(p.pins) });
       p.activeIndex = p.compositions.length - 1;
     }),
     deleteComposition: mut((i) => { const p = cur(); p.compositions.splice(i, 1); if (p.activeIndex === i) p.activeIndex = -1; else if (p.activeIndex > i) p.activeIndex -= 1; }),
@@ -226,6 +237,7 @@
     p.board = { teams: c.teams.map((t) => t.slice()), pool: [],
       notes: (c.notes || c.teams.map(() => "")).slice(),
       leaderByTeam: (c.leaderByTeam || c.teams.map(() => null)).slice(),
+      deputyByTeam: (c.deputyByTeam || c.teams.map(() => null)).slice(),
       teamNames: (c.teamNames || c.teams.map((_, ti) => "팀 " + (ti + 1))).slice() };
     p.pins = clone(c.pins || {});
     p.activeIndex = i;

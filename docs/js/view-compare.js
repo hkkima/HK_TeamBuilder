@@ -5,7 +5,7 @@
   let root = null;
   const esc = (s) => global.UI.esc(s);
   const LABELS = { total: "종합", conflict: "갈등분리", positive: "긍정유지", special_stack: "특수격리",
-    flag_same: "동일태그격리", flag_cross: "교차태그", role_required: "필수역할", role_supporter: "서포터",
+    flag_same: "동일태그격리", flag_cross: "교차태그", leader_pair: "팀장쌍", mood_cover: "분위기확보", role_required: "필수역할", role_supporter: "서포터",
     issue_stack: "고이슈격리", issue_balance: "이슈분산", disp_diversity: "성향다양성", leader: "리더확보",
     mbti_balance: "MBTI", competency_coverage: "역량커버", competency_balance: "역량평준(보조)" };
 
@@ -16,7 +16,7 @@
     if (p.compositions.length < 1) { root.innerHTML = `<div class="empty"><h2>비교할 조합이 없습니다</h2><p class="muted">② 편성 탭에서 자동 편성하거나 조합을 저장하세요.</p></div>`; return; }
     const comps = p.compositions.slice(0, 4);
     const scored = comps.map((c) => ({ c, sb: TB.scorePartition(c.teams.map(studentsOf), Store.graph(), Store.weights()) }));
-    const keys = ["total", "conflict", "positive", "special_stack", "flag_same", "flag_cross", "role_required", "role_supporter", "issue_stack", "issue_balance", "disp_diversity", "leader", "mbti_balance", "competency_coverage", "competency_balance"];
+    const keys = ["total", "conflict", "positive", "special_stack", "flag_same", "flag_cross", "leader_pair", "mood_cover", "role_required", "role_supporter", "issue_stack", "issue_balance", "disp_diversity", "leader", "mbti_balance", "competency_coverage", "competency_balance"];
     const best = {}; keys.forEach((k) => { best[k] = Math.max.apply(null, scored.map((s) => k === "total" ? s.sb.total : s.sb.parts[k])); });
 
     const header = `<tr><th>항목</th>${scored.map((s) => `<th>${esc(s.c.name)}<div class="src2">${s.c.src}</div></th>`).join("")}</tr>`;

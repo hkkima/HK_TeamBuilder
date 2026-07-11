@@ -146,6 +146,24 @@ def test_pins():
     print("ok: 핀 고정 + 점수 일치 + 범위 예외")
 
 
+def test_leader_pair_and_mood():
+    students, graph, _ = _load()
+    recs = build_recommendations(students, graph, teams=4, n_options=1, restarts=80)
+    top = recs[0]
+    byid = {m.id: m for t in top.teams for m in t.members}
+    for t in top.teams:
+        lid = top.leader_by_team[t.index]
+        did = top.deputy_by_team[t.index]
+        assert lid is not None and lid in t.ids, f"팀 {t.index} 팀장 미지정"
+        if len(t.members) >= 2:
+            assert did is not None and did in t.ids and did != lid, f"팀 {t.index} 부팀장 이상"
+    # 새 점수 항목이 노출되는지
+    assert "leader_pair" in top.score.parts and "mood_cover" in top.score.parts
+    # 분위기메이커 확보는 (샘플상 충분) 모든 팀 달성 기대
+    assert top.score.mood_missing == 0, f"분위기 미확보 {top.score.mood_missing}"
+    print("ok: 팀장/부팀장 지정 + 분위기 확보 + 점수항목")
+
+
 def test_options_distinct():
     students, graph, _ = _load()
     recs = build_recommendations(students, graph, teams=4, n_options=3, restarts=40)
@@ -163,5 +181,6 @@ if __name__ == "__main__":
     test_special_tag()
     test_flags_and_roles()
     test_pins()
+    test_leader_pair_and_mood()
     test_options_distinct()
     print("\n전체 통과 ✅")

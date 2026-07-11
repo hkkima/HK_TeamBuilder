@@ -16,6 +16,8 @@ PART_LABELS = {
     "special_stack": "특수관리 격리",
     "flag_same": "동일태그 격리",
     "flag_cross": "교차태그 회피",
+    "leader_pair": "팀장/부팀장 쌍",
+    "mood_cover": "분위기메이커 확보",
     "role_required": "필수역할",
     "role_supporter": "서포터 보너스",
     "issue_stack": "고이슈 격리",
@@ -67,11 +69,25 @@ def render_recommendation(idx: int, rec: Recommendation, graph: RelationshipGrap
         lines.append(f"- → ⚠️ 강제 제약 위반: 결합 {bt}쌍, 분리 {vs}쌍")
     lines.append("")
 
+    by_id = {m.id: m for team in rec.teams for m in team.members}
+    leaders = rec.leader_by_team or []
+    deputies = rec.deputy_by_team or []
+
+    def _nm(sid):
+        m = by_id.get(sid)
+        return m.name if m else "미지정"
+
     for team in rec.teams:
         names = ", ".join(f"{m.name}({m.mbti or '-'})" for m in team.members)
         comp = team.avg_competency()
         issue = sum(m.issue_level for m in team.members)
+        lid = leaders[team.index] if team.index < len(leaders) else None
+        did = deputies[team.index] if team.index < len(deputies) else None
         lines.append(f"### 팀 {team.index + 1}  ({len(team.members)}명)")
+        lead_line = f"- 팀장: 👑 {_nm(lid)}" if lid else "- 팀장: 미지정"
+        if did:
+            lead_line += f"  ·  부팀장: 🎖 {_nm(did)}"
+        lines.append(lead_line)
         lines.append(f"- 멤버: {names}")
         lines.append(f"- 성향: {_disps_in(team)}")
         lines.append(f"- 리더 후보: {_leaders_in(team)}")

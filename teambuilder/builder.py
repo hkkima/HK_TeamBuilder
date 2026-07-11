@@ -16,7 +16,7 @@ import random
 from dataclasses import dataclass
 from typing import Optional
 
-from .models import Student, Team
+from .models import (DISP_MANAGER, DISP_MOOD, DISP_OWNER, Student, Team)
 from .relationship import RelationshipGraph
 from .scoring import ScoreBreakdown, Weights, score_partition
 
@@ -26,6 +26,58 @@ class Recommendation:
     teams: list[Team]
     score: ScoreBreakdown
     signature: tuple  # 중복 판별용 (각 팀의 정렬된 id 튜플의 정렬 집합)
+    # 팀별 팀장/부팀장 학생 id (없으면 None). teams 인덱스와 정렬 일치.
+    leader_by_team: list[Optional[str]] = None
+    deputy_by_team: list[Optional[str]] = None
+
+
+def designate_team(members: list[Student]) -> tuple[Optional[str], Optional[str]]:
+    """한 팀의 (팀장, 부팀장) id 지정.
+
+    책임자≥1·매니저≥1 을 만족하는 서로 다른 두 명의 쌍 중 커버리지(그다음 리더십)가
+    최대인 쌍을 고르고, 없으면 리더 후보 순으로 대체. 팀장은 책임자 점수(동률 리더십)가
+    높은 쪽.
+    """
+    if not members:
+        return (None, None)
+    if len(members) == 1:
+        return (members[0].id, None)
+
+    def lead(m: Student) -> float:
+        return m.leadership or 0.0
+
+    best = None  # (cover, ls, i, j)
+    n = len(members)
+    for i in range(n):
+        for j in range(i + 1, n):
+            a, b = members[i], members[j]
+            os_ = a.disp_score(DISP_OWNER) + b.disp_score(DISP_OWNER)
+            ms_ = a.disp_score(DISP_MANAGER) + b.disp_score(DISP_MANAGER)
+            if os_ >= 1.0 and ms_ >= 1.0:
+                cand = (os_ + ms_, lead(a) + lead(b), i, j)
+                if best is None or cand[:2] > best[:2]:
+                    best = cand
+    if best is not None:
+        a, b = members[best[2]], members[best[3]]
+    else:
+        ranked = sorted(
+            members,
+            key=lambda m: (m.is_leader_candidate(), m.disp_score(DISP_OWNER), lead(m)),
+            reverse=True)
+        a, b = ranked[0], ranked[1]
+    # 팀장 = 책임자 점수 우선(동률 리더십)
+    if (b.disp_score(DISP_OWNER), lead(b)) > (a.disp_score(DISP_OWNER), lead(a)):
+        a, b = b, a
+    return (a.id, b.id)
+
+
+def designate_leaders(teams: list[list[Student]]) -> tuple[list, list]:
+    leaders, deputies = [], []
+    for t in teams:
+        lid, did = designate_team(t)
+        leaders.append(lid)
+        deputies.append(did)
+    return leaders, deputies
 
 
 def sizes_for(n_students: int, *, teams: int | None, sizes: list[int] | None) -> list[int]:
@@ -217,7 +269,26 @@ def _seed_assignment(
     def sep_cost_of(gids, t: int) -> int:
         return sum(1 for gid in gids for p in sep_partners.get(gid, ()) if p in members_in_team[t])
 
-    def place_free(gi: int) -> bool:
+    def team_ds(t: int, disp: str) -> float:
+        return sum(students[i].disp_score(disp) for i in range(len(students)) if assign[i] == t)
+
+    def grp_ds(gi: int, disp: str) -> float:
+        return sum(students[i].disp_score(disp) for i in groups[gi])
+
+    def leader_bias(gi: int, t: int) -> int:
+        b = 0
+        if grp_ds(gi, DISP_OWNER) > 0 and team_ds(t, DISP_OWNER) < 1:
+            b -= 2
+        if grp_ds(gi, DISP_MANAGER) > 0 and team_ds(t, DISP_MANAGER) < 1:
+            b -= 2
+        if team_ds(t, DISP_OWNER) >= 1 and team_ds(t, DISP_MANAGER) >= 1:
+            b += 1
+        return b
+
+    def mood_bias(gi: int, t: int) -> int:
+        return -2 if team_ds(t, DISP_MOOD) < 1 else 1
+
+    def place_free(gi: int, bias=None) -> bool:
         grp = groups[gi]
         gids = [ids[i] for i in grp]
         cand = [t for t in range(n_teams) if remaining[t] >= len(grp)
@@ -225,7 +296,7 @@ def _seed_assignment(
         if not cand:
             return False
         rng.shuffle(cand)
-        cand.sort(key=lambda t: sep_cost_of(gids, t))
+        cand.sort(key=lambda t: (sep_cost_of(gids, t), bias(gi, t) if bias else 0))
         return place(gi, cand[0])
 
     # 1) 핀 고정 그룹
@@ -239,11 +310,30 @@ def _seed_assignment(
     for gi in special_order:
         if not place_free(gi):
             return None
-    # 3) 나머지
-    rest = sorted((gi for gi in range(len(groups))
-                   if not group_special[gi] and gi not in group_pin),
-                  key=lambda gi: (-len(groups[gi]), rng.random()))
-    for gi in rest:
+    # 3) 단계별: ① 리더 후보(책임자/매니저) 분산 → ② 분위기메이커 확보 → ③ 나머지
+    rest = [gi for gi in range(len(groups))
+            if not group_special[gi] and gi not in group_pin]
+
+    def is_leader_g(gi):
+        return grp_ds(gi, DISP_OWNER) > 0 or grp_ds(gi, DISP_MANAGER) > 0
+
+    def is_mood_g(gi):
+        return grp_ds(gi, DISP_MOOD) > 0
+
+    leader_g = sorted((gi for gi in rest if is_leader_g(gi)),
+                      key=lambda gi: (-(grp_ds(gi, DISP_OWNER) + grp_ds(gi, DISP_MANAGER)),
+                                      -len(groups[gi]), rng.random()))
+    mood_g = sorted((gi for gi in rest if not is_leader_g(gi) and is_mood_g(gi)),
+                    key=lambda gi: (-grp_ds(gi, DISP_MOOD), -len(groups[gi]), rng.random()))
+    other_g = sorted((gi for gi in rest if not is_leader_g(gi) and not is_mood_g(gi)),
+                     key=lambda gi: (-len(groups[gi]), rng.random()))
+    for gi in leader_g:
+        if not place_free(gi, leader_bias):
+            return None
+    for gi in mood_g:
+        if not place_free(gi, mood_bias):
+            return None
+    for gi in other_g:
         if not place_free(gi):
             return None
     return assign
@@ -377,7 +467,9 @@ def build_recommendations(
         partition = _partition_from_assignment(students, assign, n_teams)
         sig = _signature(partition)
         team_objs = [Team(index=i, members=partition[i]) for i in range(n_teams)]
-        rec = Recommendation(teams=team_objs, score=sb, signature=sig)
+        leaders, deputies = designate_leaders(partition)
+        rec = Recommendation(teams=team_objs, score=sb, signature=sig,
+                             leader_by_team=leaders, deputy_by_team=deputies)
         if sig not in found or sb.total > found[sig].score.total:
             found[sig] = rec
 
