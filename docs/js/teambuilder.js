@@ -194,6 +194,9 @@
   }
   // 한 팀의 팀장/부팀장 지정: 책임자≥1·매니저≥1 커버 쌍 중 최선, 없으면 리더후보 순.
   // 팀장 = 책임자 점수 높은 쪽(동률 리더십), 부팀장 = 나머지.
+  // 팀장 적합도: 책임자+매니저 성향 + 리더십 + 관리 능력, 관리대상(특별)은 감점.
+  const leaderRank = (m) => dispScore(m, DISP_OWNER) + dispScore(m, DISP_MANAGER)
+    + (m.leadership || 0) / 3 + (m.management || 0) / 3 - (m.special ? 2 : 0);
   function designateTeam(ms) {
     if (!ms.length) return { leader: null, deputy: null };
     if (ms.length === 1) return { leader: ms[0].id, deputy: null };
@@ -209,15 +212,12 @@
     }
     if (best) { a = ms[best.i]; b = ms[best.j]; }
     else {
-      const ranked = ms.slice().sort((x, y) =>
-        ((leaderCandidate(y) ? 1 : 0) - (leaderCandidate(x) ? 1 : 0)) ||
-        (dispScore(y, DISP_OWNER) - dispScore(x, DISP_OWNER)) || (lead(y) - lead(x)));
+      const ranked = ms.slice().sort((x, y) => (leaderRank(y) - leaderRank(x)) || (lead(y) - lead(x)));
       a = ranked[0]; b = ranked[1];
     }
-    // 팀장 = 책임자 점수 우선(동률 리더십)
+    // 팀장 = 복합 적합도(책임자·매니저·리더십·관리·관리대상아님) 우선(동률 리더십)
     let leader = a, deputy = b;
-    if (dispScore(b, DISP_OWNER) > dispScore(a, DISP_OWNER) ||
-        (dispScore(b, DISP_OWNER) === dispScore(a, DISP_OWNER) && lead(b) > lead(a))) { leader = b; deputy = a; }
+    if (leaderRank(b) > leaderRank(a) || (leaderRank(b) === leaderRank(a) && lead(b) > lead(a))) { leader = b; deputy = a; }
     return { leader: leader.id, deputy: deputy.id };
   }
   function designateLeaders(teams) {

@@ -46,6 +46,12 @@ def designate_team(members: list[Student]) -> tuple[Optional[str], Optional[str]
     def lead(m: Student) -> float:
         return m.leadership or 0.0
 
+    def rank(m: Student) -> float:
+        # 팀장 적합도: 책임자+매니저 성향 + 리더십 + 관리 능력, 관리대상(특별)은 감점
+        return (m.disp_score(DISP_OWNER) + m.disp_score(DISP_MANAGER)
+                + (m.leadership or 0.0) / 3 + (m.management or 0.0) / 3
+                - (2.0 if m.special else 0.0))
+
     best = None  # (cover, ls, i, j)
     n = len(members)
     for i in range(n):
@@ -60,13 +66,10 @@ def designate_team(members: list[Student]) -> tuple[Optional[str], Optional[str]
     if best is not None:
         a, b = members[best[2]], members[best[3]]
     else:
-        ranked = sorted(
-            members,
-            key=lambda m: (m.is_leader_candidate(), m.disp_score(DISP_OWNER), lead(m)),
-            reverse=True)
+        ranked = sorted(members, key=lambda m: (rank(m), lead(m)), reverse=True)
         a, b = ranked[0], ranked[1]
-    # 팀장 = 책임자 점수 우선(동률 리더십)
-    if (b.disp_score(DISP_OWNER), lead(b)) > (a.disp_score(DISP_OWNER), lead(a)):
+    # 팀장 = 복합 적합도(책임자·매니저·리더십·관리·관리대상아님) 우선(동률 리더십)
+    if (rank(b), lead(b)) > (rank(a), lead(a)):
         a, b = b, a
     return (a.id, b.id)
 
